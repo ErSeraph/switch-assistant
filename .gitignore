@@ -1,0 +1,37 @@
+# Build outputs
+/build/
+/sysmodule/build/
+/dist/
+
+# Generated Switch artifacts
+/switch-ha.elf
+/switch-ha.nro
+/switch-ha.nsp
+/switch-ha.nso
+/switch-ha.nacp
+/switch-ha.pfs0
+/switch-ha.lst
+/switch-ha.map
+/sysmodule/switch-ha-sysmodule.elf
+/sysmodule/switch-ha-sysmodule.npdm
+/sysmodule/switch-ha-sysmodule.nso
+/sysmodule/switch-ha-sysmodule.nsp
+/sysmodule/switch-ha-sysmodule.lst
+/sysmodule/switch-ha-sysmodule.map
+/sysmodule/atmosphere/
+
+# Staged generated blob used by source/sysmodule_blob.s
+/romfs/sysmodule/exefs.nsp
+/romfs/sysmodule/boot2.flag
+
+# Toolchain intermediates
+*.o
+*.d
+*.lst
+*.map
+
+# Local/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
