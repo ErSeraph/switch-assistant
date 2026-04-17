@@ -28,26 +28,14 @@ jobs:
           rm -rf build switch-ha.elf switch-ha.nro
           docker run --rm -v "$PWD:/workspace" -w /workspace devkitpro/devkita64 /bin/bash -lc "make"
 
-      - name: Package extract-to-SD zip
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          mkdir -p "dist/switch/switch-ha"
-          cp switch-ha.nro "dist/switch/switch-ha/switch-ha.nro"
-          (cd dist && zip -r "../switch-ha-${version}-extracttosd.zip" switch)
-
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: switch-ha
-          path: |
-            switch-ha.nro
-            switch-ha-*-extracttosd.zip
+          path: switch-ha.nro
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            switch-ha.nro
-            switch-ha-*-extracttosd.zip
+          files: switch-ha.nro
