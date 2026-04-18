@@ -11,6 +11,7 @@
 
 #define DEFAULT_NRO "sdmc:/switch/switch-ha/switch-ha-overlay.ovl"
 #define LOADER_LOG "sdmc:/switch/switch-ha/overlay-loader.log"
+#define LOADER_LOG_MAX_BYTES 4096
 #ifndef NORETURN
 #define NORETURN __attribute__((noreturn))
 #endif
@@ -51,6 +52,19 @@ static u64 monotonicMs(void)
 
 static void appendLog(const char *message, Result rc)
 {
+    FILE *check = fopen(LOADER_LOG, "rb");
+    if (check) {
+        if (fseek(check, 0, SEEK_END) == 0 && ftell(check) > LOADER_LOG_MAX_BYTES) {
+            fclose(check);
+            check = fopen(LOADER_LOG, "w");
+            if (check) {
+                fclose(check);
+            }
+        } else {
+            fclose(check);
+        }
+    }
+
     FILE *file = fopen(LOADER_LOG, "a");
     if (!file)
         return;

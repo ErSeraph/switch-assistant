@@ -22,6 +22,7 @@
 #define NOTIFY_TEXT_MAX 512
 #define NOTIFICATION_CURRENT_PATH "sdmc:/switch/switch-ha/notification-current.ini"
 #define NOTIFICATION_LOG_PATH "sdmc:/switch/switch-ha/notifications.log"
+#define NOTIFICATION_LOG_MAX_BYTES 8192
 
 typedef struct {
     bool initialized;
@@ -527,6 +528,26 @@ static void write_sanitized_value(FILE *file, const char *key, const char *value
     fputc('\n', file);
 }
 
+static void truncate_log_if_needed(const char *path, long max_bytes) {
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+        return;
+    }
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return;
+    }
+    long size = ftell(file);
+    fclose(file);
+
+    if (size > max_bytes) {
+        file = fopen(path, "w");
+        if (file) {
+            fclose(file);
+        }
+    }
+}
+
 static bool write_notification_files(const char *mode, const char *title, const char *message) {
     u64 id = monotonic_ms();
 
@@ -541,6 +562,7 @@ static bool write_notification_files(const char *mode, const char *title, const 
     fprintf(current, "duration_ms=4500\n");
     fclose(current);
 
+    truncate_log_if_needed(NOTIFICATION_LOG_PATH, NOTIFICATION_LOG_MAX_BYTES);
     FILE *log = fopen(NOTIFICATION_LOG_PATH, "a");
     if (log) {
         fprintf(log, "%llu mode=%s title=%s message=%s\n", (unsigned long long) id, mode, title, message);

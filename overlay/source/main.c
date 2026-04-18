@@ -10,6 +10,7 @@
 #define NOTIFICATION_PATH "sdmc:/switch/switch-ha/notification-current.ini"
 #define LOG_PATH "sdmc:/switch/switch-ha/overlay.log"
 #define STATUS_PATH "sdmc:/switch/switch-ha/overlay-status.ini"
+#define LOG_MAX_BYTES 8192
 #define LAYER_W 1280
 #define LAYER_H 720
 #define SCREEN_W 640
@@ -86,6 +87,19 @@ void __appExit(void) {
 }
 
 static void append_log(const char *message, Result rc) {
+    FILE *check = fopen(LOG_PATH, "rb");
+    if (check) {
+        if (fseek(check, 0, SEEK_END) == 0 && ftell(check) > LOG_MAX_BYTES) {
+            fclose(check);
+            check = fopen(LOG_PATH, "w");
+            if (check) {
+                fclose(check);
+            }
+        } else {
+            fclose(check);
+        }
+    }
+
     FILE *file = fopen(LOG_PATH, "a");
     if (!file) {
         return;
