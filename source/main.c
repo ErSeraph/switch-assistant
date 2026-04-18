@@ -15,9 +15,18 @@
 #define SYSMODULE_SDMC_BASE "sdmc:/atmosphere/contents/" SYSMODULE_TITLE_ID
 #define SYSMODULE_SDMC_EXEFS SYSMODULE_SDMC_BASE "/exefs.nsp"
 #define SYSMODULE_SDMC_FLAG SYSMODULE_SDMC_BASE "/flags/boot2.flag"
+#define OVERLAY_LOADER_TITLE_ID "0100000000000F13"
+#define OVERLAY_LOADER_SDMC_BASE "sdmc:/atmosphere/contents/" OVERLAY_LOADER_TITLE_ID
+#define OVERLAY_LOADER_SDMC_EXEFS OVERLAY_LOADER_SDMC_BASE "/exefs.nsp"
+#define OVERLAY_LOADER_SDMC_FLAG OVERLAY_LOADER_SDMC_BASE "/flags/boot2.flag"
+#define OVERLAY_SDMC_PATH "sdmc:/switch/switch-ha/switch-ha-overlay.ovl"
 
 extern const unsigned char switch_ha_sysmodule_exefs_start[];
 extern const unsigned char switch_ha_sysmodule_exefs_end[];
+extern const unsigned char switch_ha_overlay_loader_exefs_start[];
+extern const unsigned char switch_ha_overlay_loader_exefs_end[];
+extern const unsigned char switch_ha_overlay_ovl_start[];
+extern const unsigned char switch_ha_overlay_ovl_end[];
 
 static bool ensure_dir(const char *path) {
     if (mkdir(path, 0777) == 0 || errno == EEXIST) {
@@ -40,10 +49,14 @@ static bool write_file(const char *dst_path, const unsigned char *data, size_t s
 }
 
 static bool install_sysmodule(AppState *state) {
-    if (!ensure_dir("sdmc:/atmosphere") ||
+    if (!ensure_dir("sdmc:/switch") ||
+        !ensure_dir("sdmc:/switch/switch-ha") ||
+        !ensure_dir("sdmc:/atmosphere") ||
         !ensure_dir("sdmc:/atmosphere/contents") ||
         !ensure_dir(SYSMODULE_SDMC_BASE) ||
-        !ensure_dir(SYSMODULE_SDMC_BASE "/flags")) {
+        !ensure_dir(SYSMODULE_SDMC_BASE "/flags") ||
+        !ensure_dir(OVERLAY_LOADER_SDMC_BASE) ||
+        !ensure_dir(OVERLAY_LOADER_SDMC_BASE "/flags")) {
         app_state_push_log(state, "Sysmodule install failed: mkdir");
         return false;
     }
@@ -54,6 +67,18 @@ static bool install_sysmodule(AppState *state) {
         return false;
     }
 
+    size_t overlay_loader_size = (size_t) (switch_ha_overlay_loader_exefs_end - switch_ha_overlay_loader_exefs_start);
+    if (overlay_loader_size == 0 || !write_file(OVERLAY_LOADER_SDMC_EXEFS, switch_ha_overlay_loader_exefs_start, overlay_loader_size)) {
+        app_state_push_log(state, "Overlay loader install failed");
+        return false;
+    }
+
+    size_t overlay_size = (size_t) (switch_ha_overlay_ovl_end - switch_ha_overlay_ovl_start);
+    if (overlay_size == 0 || !write_file(OVERLAY_SDMC_PATH, switch_ha_overlay_ovl_start, overlay_size)) {
+        app_state_push_log(state, "Overlay install failed");
+        return false;
+    }
+
     FILE *flag = fopen(SYSMODULE_SDMC_FLAG, "wb");
     if (!flag) {
         app_state_push_log(state, "Sysmodule install failed: boot2");
@@ -61,7 +86,14 @@ static bool install_sysmodule(AppState *state) {
     }
     fclose(flag);
 
-    app_state_push_log(state, "Sysmodule installed");
+    flag = fopen(OVERLAY_LOADER_SDMC_FLAG, "wb");
+    if (!flag) {
+        app_state_push_log(state, "Overlay loader install failed: boot2");
+        return false;
+    }
+    fclose(flag);
+
+    app_state_push_log(state, "Sysmodules and overlay installed");
     return true;
 }
 

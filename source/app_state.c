@@ -11,6 +11,7 @@ void app_state_init(AppState *state) {
     snprintf(state->status_line, sizeof(state->status_line), "Idle");
     snprintf(state->config_status, sizeof(state->config_status), "not loaded");
     snprintf(state->mqtt_last_error, sizeof(state->mqtt_last_error), "not connected");
+    snprintf(state->game_status, sizeof(state->game_status), "not checked");
 }
 
 static void write_line(char *dst, size_t dst_size, const char *fmt, va_list args) {

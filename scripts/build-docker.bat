@@ -34,6 +34,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
+docker run --rm -v "%ROOT%:/workspace" -w /workspace/overlay %IMAGE% /bin/bash -lc "make"
+if errorlevel 1 (
+    echo Build command failed: overlay make
+    exit /b 1
+)
+
+docker run --rm -v "%ROOT%:/workspace" -w /workspace/overlay-loader %IMAGE% /bin/bash -lc "make install-layout"
+if errorlevel 1 (
+    echo Build command failed: overlay-loader make install-layout
+    exit /b 1
+)
+
 if not exist "%ROOT%\romfs\sysmodule" mkdir "%ROOT%\romfs\sysmodule"
 copy /Y "%ROOT%\sysmodule\atmosphere\contents\0100000000000F12\exefs.nsp" "%ROOT%\romfs\sysmodule\exefs.nsp" >nul
 if errorlevel 1 (
@@ -41,6 +53,21 @@ if errorlevel 1 (
     exit /b 1
 )
 type nul > "%ROOT%\romfs\sysmodule\boot2.flag"
+
+if not exist "%ROOT%\romfs\overlay-loader" mkdir "%ROOT%\romfs\overlay-loader"
+copy /Y "%ROOT%\overlay-loader\atmosphere\contents\0100000000000F13\exefs.nsp" "%ROOT%\romfs\overlay-loader\exefs.nsp" >nul
+if errorlevel 1 (
+    echo Failed to stage overlay loader exefs.nsp into romfs.
+    exit /b 1
+)
+type nul > "%ROOT%\romfs\overlay-loader\boot2.flag"
+
+if not exist "%ROOT%\romfs\overlay" mkdir "%ROOT%\romfs\overlay"
+copy /Y "%ROOT%\overlay\switch-ha-overlay.ovl" "%ROOT%\romfs\overlay\switch-ha-overlay.ovl" >nul
+if errorlevel 1 (
+    echo Failed to stage switch-ha-overlay.ovl into romfs.
+    exit /b 1
+)
 
 if exist "%ROOT%\build\sysmodule_blob.o" del "%ROOT%\build\sysmodule_blob.o"
 if exist "%ROOT%\switch-ha.elf" del "%ROOT%\switch-ha.elf"

@@ -19,6 +19,10 @@
 #define MQTT_HEARTBEAT_INTERVAL_MS 15000
 #define SWITCH_HA_ENABLE_SYSTEM_SENSORS 1
 #define MAX_PLAYERS 8
+#define NOTIFY_TEXT_MAX 512
+#define NOTIFICATION_CURRENT_PATH "sdmc:/switch/switch-ha/notification-current.ini"
+#define NOTIFICATION_LOG_PATH "sdmc:/switch/switch-ha/notifications.log"
+#define NOTIFICATION_LOG_MAX_BYTES 8192
 
 typedef struct {
     bool initialized;
@@ -32,6 +36,8 @@ typedef struct {
     char backlight[16];
     char volume[16];
     char audio_target[24];
+    char game_running[8];
+    char current_game_id[24];
     char player_controller_count[16];
     char player_controller[MAX_PLAYERS][32];
 } SensorSnapshot;
@@ -43,6 +49,9 @@ typedef struct {
 } MqttContext;
 
 static MqttContext g_ctx = {0};
+
+static void sanitize_id(const char *input, char *output, size_t output_size);
+static const char *client_id_or_device(const AppConfig *config);
 
 static u64 monotonic_ms(void) {
     return armTicksToNs(armGetSystemTick()) / 1000000ULL;
@@ -62,6 +71,10 @@ static void mqtt_set_status(AppState *state, bool dns_ok, bool tcp_ok, bool sess
     strncpy(state->mqtt_last_error, message, sizeof(state->mqtt_last_error) - 1);
     state->mqtt_last_error[sizeof(state->mqtt_last_error) - 1] = '\0';
     mutexUnlock(&state->lock);
+}
+
+static bool is_application_program_id(u64 program_id) {
+    return program_id >= 0x0100000000010000ULL;
 }
 
 static bool parse_port(const char *value, int *port) {
@@ -428,6 +441,213 @@ static void controller_value(char *out, size_t out_size, u32 style) {
     snprintf(out, out_size, "%s", controller_style_name(style));
 }
 
+static void copy_text(char *out, size_t out_size, const char *text) {
+    if (out_size == 0) {
+        return;
+    }
+    size_t len = strnlen(text, out_size - 1);
+    memcpy(out, text, len);
+    out[len] = '\0';
+}
+
+static void trim_text(char *value) {
+    while (value[0] == ' ' || value[0] == '\t' || value[0] == '\r' || value[0] == '\n') {
+        memmove(value, value + 1, strlen(value));
+    }
+
+    size_t len = strlen(value);
+    while (len > 0) {
+        char ch = value[len - 1];
+        if (ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n') {
+            break;
+        }
+        value[--len] = '\0';
+    }
+}
+
+static bool json_extract_string(const char *json, const char *key, char *out, size_t out_size) {
+    char pattern[40];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+
+    const char *pos = strstr(json, pattern);
+    if (!pos) {
+        return false;
+    }
+    pos += strlen(pattern);
+    while (*pos == ' ' || *pos == '\t' || *pos == '\r' || *pos == '\n') pos++;
+    if (*pos != ':') return false;
+    pos++;
+    while (*pos == ' ' || *pos == '\t' || *pos == '\r' || *pos == '\n') pos++;
+    if (*pos != '"') return false;
+    pos++;
+
+    size_t used = 0;
+    while (*pos && *pos != '"' && used + 1 < out_size) {
+        if (*pos == '\\' && pos[1]) {
+            pos++;
+            switch (*pos) {
+                case 'n': out[used++] = ' '; break;
+                case 'r': out[used++] = ' '; break;
+                case 't': out[used++] = ' '; break;
+                case '"':
+                case '\\':
+                case '/':
+                    out[used++] = *pos;
+                    break;
+                default:
+                    out[used++] = *pos;
+                    break;
+            }
+            pos++;
+        } else {
+            out[used++] = *pos++;
+        }
+    }
+    out[used] = '\0';
+    return used > 0;
+}
+
+static void notification_topic(const AppConfig *config, const char *mode, char *topic, size_t topic_size) {
+    char safe_id[80];
+    sanitize_id(client_id_or_device(config), safe_id, sizeof(safe_id));
+    snprintf(topic, topic_size, "switch_ha/%s/notify/%s", safe_id, mode);
+}
+
+static void notification_status_topic(const AppConfig *config, char *topic, size_t topic_size) {
+    char safe_id[80];
+    sanitize_id(client_id_or_device(config), safe_id, sizeof(safe_id));
+    snprintf(topic, topic_size, "switch_ha/%s/notify/status", safe_id);
+}
+
+static void write_sanitized_value(FILE *file, const char *key, const char *value) {
+    fprintf(file, "%s=", key);
+    for (size_t i = 0; value[i]; ++i) {
+        char ch = value[i];
+        fputc((ch == '\n' || ch == '\r') ? ' ' : ch, file);
+    }
+    fputc('\n', file);
+}
+
+static void truncate_log_if_needed(const char *path, long max_bytes) {
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+        return;
+    }
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return;
+    }
+    long size = ftell(file);
+    fclose(file);
+
+    if (size > max_bytes) {
+        file = fopen(path, "w");
+        if (file) {
+            fclose(file);
+        }
+    }
+}
+
+static bool write_notification_files(const char *mode, const char *title, const char *message) {
+    u64 id = monotonic_ms();
+
+    FILE *current = fopen(NOTIFICATION_CURRENT_PATH, "w");
+    if (!current) {
+        return false;
+    }
+    fprintf(current, "id=%llu\n", (unsigned long long) id);
+    write_sanitized_value(current, "mode", mode);
+    write_sanitized_value(current, "title", title);
+    write_sanitized_value(current, "message", message);
+    fprintf(current, "duration_ms=4500\n");
+    fclose(current);
+
+    truncate_log_if_needed(NOTIFICATION_LOG_PATH, NOTIFICATION_LOG_MAX_BYTES);
+    FILE *log = fopen(NOTIFICATION_LOG_PATH, "a");
+    if (log) {
+        fprintf(log, "%llu mode=%s title=%s message=%s\n", (unsigned long long) id, mode, title, message);
+        fclose(log);
+    }
+    return true;
+}
+
+static void set_game_status(AppState *state, const char *fmt, ...) {
+    char message[SHA_LOG_LINE];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    mutexLock(&state->lock);
+    if (strncmp(state->game_status, message, sizeof(state->game_status)) != 0) {
+        copy_text(state->game_status, sizeof(state->game_status), message);
+    }
+    mutexUnlock(&state->lock);
+}
+
+static bool get_program_id_quiet(u64 pid, u64 *program_id) {
+    if (R_SUCCEEDED(pminfoGetProgramId(program_id, pid)) && *program_id != 0) {
+        return true;
+    }
+    return false;
+}
+
+static bool scan_process_list_for_application(AppState *state, u64 *pid_out, u64 *program_id_out) {
+    u64 process_ids[96];
+    s32 process_count = 0;
+    Result rc = svcGetProcessList(&process_count, process_ids, (u32) (sizeof(process_ids) / sizeof(process_ids[0])));
+    if (R_FAILED(rc)) {
+        set_game_status(state, "process list failed rc=0x%x", rc);
+        return false;
+    }
+
+    u64 best_pid = 0;
+    u64 best_program_id = 0;
+    if (process_count > (s32) (sizeof(process_ids) / sizeof(process_ids[0]))) {
+        process_count = (s32) (sizeof(process_ids) / sizeof(process_ids[0]));
+    }
+
+    for (s32 i = 0; i < process_count; ++i) {
+        u64 program_id = 0;
+        if (!get_program_id_quiet(process_ids[i], &program_id)) {
+            continue;
+        }
+        if (!is_application_program_id(program_id)) {
+            continue;
+        }
+        best_pid = process_ids[i];
+        best_program_id = program_id;
+        break;
+    }
+
+    if (best_program_id == 0) {
+        set_game_status(state, "process scan no application count=%d", process_count);
+        return false;
+    }
+
+    *pid_out = best_pid;
+    *program_id_out = best_program_id;
+    return true;
+}
+
+static bool current_game(AppState *state, u64 *application_id) {
+    if (!state->svc_pminfo_ready) {
+        set_game_status(state, "pminfo unavailable");
+        return false;
+    }
+
+    u64 program_id = 0;
+    u64 pid = 0;
+
+    if (scan_process_list_for_application(state, &pid, &program_id)) {
+        *application_id = program_id;
+        set_game_status(state, "running scan=0x%016llx pid=%llu", (unsigned long long) program_id, (unsigned long long) pid);
+        return true;
+    }
+
+    return false;
+}
+
 static void sanitize_id(const char *input, char *output, size_t output_size) {
     size_t j = 0;
     for (size_t i = 0; input[i] && j + 1 < output_size; ++i) {
@@ -522,6 +742,30 @@ static void publish_discovery_button(int fd, const AppConfig *config, const char
     mqtt_send_publish(fd, topic, payload, true);
 }
 
+static void publish_discovery_notify(int fd, const AppConfig *config, const char *mode, const char *name) {
+    char topic[256];
+    char command_topic[192];
+    char payload[MQTT_BUFFER];
+    char safe_id[80];
+
+    sanitize_id(client_id_or_device(config), safe_id, sizeof(safe_id));
+    discovery_topic(config, "notify", mode, topic, sizeof(topic));
+    notification_topic(config, mode, command_topic, sizeof(command_topic));
+
+    snprintf(payload, sizeof(payload),
+             "{\"name\":\"%s\",\"uniq_id\":\"%s_notify_%s\",\"cmd_t\":\"%s\","
+             "\"cmd_tpl\":\"{{ value }}\","
+             "\"dev\":{\"ids\":[\"%s\"],\"name\":\"%s\",\"mf\":\"Nintendo\",\"mdl\":\"Switch\"}}",
+             name,
+             safe_id,
+             mode,
+             command_topic,
+             safe_id,
+             config->device_name);
+
+    mqtt_send_publish(fd, topic, payload, true);
+}
+
 static void clear_discovery_topic(int fd, const AppConfig *config, const char *component, const char *sensor) {
     char topic[256];
     discovery_topic(config, component, sensor, topic, sizeof(topic));
@@ -571,6 +815,10 @@ static void publish_sensor_discovery(AppState *state, int fd, const AppConfig *c
         publish_discovery_sensor(fd, config, "sensor", "volume", "Volume", NULL, "%", "measurement");
         publish_discovery_sensor(fd, config, "sensor", "audio_target", "Audio Output Target", NULL, NULL, NULL);
     }
+    publish_discovery_sensor(fd, config, "binary_sensor", "game_running", "Game Running", "running", NULL, NULL);
+    publish_discovery_sensor(fd, config, "sensor", "current_game_id", "Current Game Title ID", NULL, NULL, NULL);
+    clear_discovery_topic(fd, config, "sensor", "current_game_name");
+    clear_discovery_topic(fd, config, "sensor", "game_pid");
     if (state->svc_hid_ready) {
         publish_discovery_sensor(fd, config, "sensor", "controller_count", "Player Count", NULL, NULL, "measurement");
         for (int i = 0; i < MAX_PLAYERS; ++i) {
@@ -585,6 +833,8 @@ static void publish_sensor_discovery(AppState *state, int fd, const AppConfig *c
         publish_discovery_button(fd, config, "reboot", "Reboot", "reboot");
         publish_discovery_button(fd, config, "shutdown", "Shutdown", "shutdown");
     }
+    publish_discovery_notify(fd, config, "popup", "Popup Notification");
+    clear_discovery_topic(fd, config, "notify", "modal");
 }
 
 static void publish_value(int fd, const AppConfig *config, const char *sensor, const char *payload) {
@@ -644,16 +894,6 @@ static void publish_switch_sensors(AppState *state, int fd, const AppConfig *con
         publish_if_changed(fd, config, snapshot, force, "battery_health", snapshot->battery_health, sizeof(snapshot->battery_health), "0");
     }
 
-    bool poll_stable_optional = state->svc_lbl_ready || state->svc_audctl_ready;
-    if (!force && !poll_stable_optional) {
-        return;
-    }
-
-    if (!force) {
-        goto stable_optional_poll;
-    }
-
-stable_optional_poll:
     if (state->svc_lbl_ready) {
         float brightness = 0.0f;
         if (R_SUCCEEDED(lblGetCurrentBrightnessSetting(&brightness)) || R_SUCCEEDED(lblGetBrightnessSettingAppliedToBacklight(&brightness))) {
@@ -694,6 +934,20 @@ stable_optional_poll:
                 }
             }
         }
+    }
+
+    u64 application_id = 0;
+    if (current_game(state, &application_id)) {
+        publish_if_changed(fd, config, snapshot, force, "game_running", snapshot->game_running, sizeof(snapshot->game_running), "ON");
+        if (application_id != 0) {
+            snprintf(value, sizeof(value), "%016llx", (unsigned long long) application_id);
+        } else {
+            snprintf(value, sizeof(value), "unknown");
+        }
+        publish_if_changed(fd, config, snapshot, force, "current_game_id", snapshot->current_game_id, sizeof(snapshot->current_game_id), value);
+    } else {
+        publish_if_changed(fd, config, snapshot, force, "game_running", snapshot->game_running, sizeof(snapshot->game_running), "OFF");
+        publish_if_changed(fd, config, snapshot, force, "current_game_id", snapshot->current_game_id, sizeof(snapshot->current_game_id), "none");
     }
 
     HidNpadIdType player_ids[] = {
@@ -800,6 +1054,46 @@ static void handle_command_payload(AppState *state, int fd, const AppConfig *con
     }
 }
 
+static void handle_notification_payload(AppState *state, int fd, const AppConfig *config, const char *topic, const char *payload) {
+    char popup_topic[192];
+    char status_topic[192];
+    char mode[16];
+    char title[96];
+    char message[NOTIFY_TEXT_MAX];
+
+    (void) topic;
+    notification_topic(config, "popup", popup_topic, sizeof(popup_topic));
+    notification_status_topic(config, status_topic, sizeof(status_topic));
+
+    snprintf(mode, sizeof(mode), "popup");
+    snprintf(title, sizeof(title), "Home Assistant");
+    copy_text(message, sizeof(message), payload);
+
+    if (payload[0] == '{') {
+        json_extract_string(payload, "title", title, sizeof(title));
+        json_extract_string(payload, "message", message, sizeof(message));
+    } else {
+        const char *line = strchr(payload, '\n');
+        if (line && line > payload && (size_t) (line - payload) < sizeof(title)) {
+            memcpy(title, payload, (size_t) (line - payload));
+            title[line - payload] = '\0';
+            copy_text(message, sizeof(message), line + 1);
+        }
+    }
+
+    trim_text(mode);
+    trim_text(title);
+    trim_text(message);
+    if (message[0] == '\0') {
+        mqtt_send_publish(fd, status_topic, "empty", false);
+        return;
+    }
+
+    bool ok = write_notification_files(mode, title, message);
+    mqtt_send_publish(fd, status_topic, ok ? "queued" : "queue_failed", false);
+    app_state_push_log(state, "Notify %s: %.48s", mode, message);
+}
+
 static void handle_mqtt_publish(AppState *state, int fd, const AppConfig *config, const unsigned char *buffer, int size) {
     int remaining = 0;
     int remaining_bytes = 0;
@@ -813,10 +1107,19 @@ static void handle_mqtt_publish(AppState *state, int fd, const AppConfig *config
     }
 
     int topic_len = ((int) buffer[pos] << 8) | buffer[pos + 1];
-    pos += 2 + topic_len;
-    if (topic_len <= 0 || pos > size) {
+    pos += 2;
+    if (topic_len <= 0 || pos + topic_len > size) {
         return;
     }
+
+    char topic[192];
+    int copy_topic_len = topic_len;
+    if (copy_topic_len >= (int) sizeof(topic)) {
+        copy_topic_len = (int) sizeof(topic) - 1;
+    }
+    memcpy(topic, buffer + pos, (size_t) copy_topic_len);
+    topic[copy_topic_len] = '\0';
+    pos += topic_len;
 
     int qos = (buffer[0] & 0x06) >> 1;
     if (qos > 0) {
@@ -830,14 +1133,24 @@ static void handle_mqtt_publish(AppState *state, int fd, const AppConfig *config
     if (payload_len <= 0) {
         return;
     }
-    if (payload_len >= SHA_LOG_LINE) {
-        payload_len = SHA_LOG_LINE - 1;
+    if (payload_len >= NOTIFY_TEXT_MAX) {
+        payload_len = NOTIFY_TEXT_MAX - 1;
     }
 
-    char payload[SHA_LOG_LINE];
+    char payload[NOTIFY_TEXT_MAX];
     memcpy(payload, buffer + pos, (size_t) payload_len);
     payload[payload_len] = '\0';
-    handle_command_payload(state, fd, config, payload);
+
+    char command_topic[SHA_MAX_TOPIC + 32];
+    char popup_topic[192];
+    snprintf(command_topic, sizeof(command_topic), "%s/command", config->mqtt_topic_prefix);
+    notification_topic(config, "popup", popup_topic, sizeof(popup_topic));
+
+    if (strcmp(topic, command_topic) == 0) {
+        handle_command_payload(state, fd, config, payload);
+    } else if (strcmp(topic, popup_topic) == 0) {
+        handle_notification_payload(state, fd, config, topic, payload);
+    }
 }
 
 static void mqtt_loop(void *arg) {
@@ -922,6 +1235,9 @@ static void mqtt_loop(void *arg) {
         char command_topic[SHA_MAX_TOPIC + 32];
         snprintf(command_topic, sizeof(command_topic), "%s/command", prefix);
         mqtt_send_subscribe(fd, command_topic);
+        char popup_topic[192];
+        notification_topic(&config, "popup", popup_topic, sizeof(popup_topic));
+        mqtt_send_subscribe(fd, popup_topic);
 
         mutexLock(&state->lock);
         state->mqtt_dns_ok = true;

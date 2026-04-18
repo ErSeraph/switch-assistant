@@ -41,10 +41,12 @@ typedef struct {
     bool svc_lbl_ready;
     bool svc_audctl_ready;
     bool svc_spsm_ready;
+    bool svc_pminfo_ready;
     u64 last_heartbeat_ms;
     char status_line[SHA_LOG_LINE];
     char config_status[SHA_LOG_LINE];
     char mqtt_last_error[SHA_LOG_LINE];
+    char game_status[SHA_LOG_LINE];
     AppMode app_mode;
     char log_lines[SHA_MAX_LOG][SHA_LOG_LINE];
     int log_count;
