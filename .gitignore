@@ -1,6 +1,8 @@
 # Build outputs
 /build/
 /sysmodule/build/
+/overlay/build/
+/overlay-loader/build/
 /dist/
 
 # Generated Switch artifacts
@@ -19,10 +21,24 @@
 /sysmodule/switch-ha-sysmodule.lst
 /sysmodule/switch-ha-sysmodule.map
 /sysmodule/atmosphere/
+/overlay/switch-ha-overlay.elf
+/overlay/switch-ha-overlay.ovl
+/overlay/switch-ha-overlay.lst
+/overlay/switch-ha-overlay.map
+/overlay-loader/switch-ha-overlay-loader.elf
+/overlay-loader/switch-ha-overlay-loader.npdm
+/overlay-loader/switch-ha-overlay-loader.nso
+/overlay-loader/switch-ha-overlay-loader.nsp
+/overlay-loader/switch-ha-overlay-loader.lst
+/overlay-loader/switch-ha-overlay-loader.map
+/overlay-loader/atmosphere/
 
 # Staged generated blob used by source/sysmodule_blob.s
 /romfs/sysmodule/exefs.nsp
 /romfs/sysmodule/boot2.flag
+/romfs/overlay-loader/exefs.nsp
+/romfs/overlay-loader/boot2.flag
+/romfs/overlay/switch-ha-overlay.ovl
 
 # Toolchain intermediates
 *.o
@@ -35,3 +51,4 @@
 Thumbs.db
 .vscode/
 .idea/
+.tmp-*/
