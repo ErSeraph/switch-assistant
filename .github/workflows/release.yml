@@ -5,7 +5,6 @@ on:
   push:
     tags:
       - "v*"
-      - "[0-9]*"
 
 permissions:
   contents: write
@@ -42,8 +41,16 @@ jobs:
           name: switch-ha
           path: switch-ha.nro
 
+      - name: Prepare release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format="%(contents)" > RELEASE_NOTES.md
+
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
           files: switch-ha.nro
