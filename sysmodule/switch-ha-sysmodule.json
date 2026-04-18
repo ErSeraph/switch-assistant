@@ -79,6 +79,7 @@
 				"svcReplyAndReceive":	"0x43",
 				"svcCreateEvent":	"0x45",
 				"svcGetSystemInfo":	"0x6f",
+				"svcGetProcessList":	"0x65",
 				"svcCreatePort":	"0x70",
 				"svcManageNamedPort":	"0x71",
 				"svcConnectToPort":	"0x72"

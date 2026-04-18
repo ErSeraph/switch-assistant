@@ -31,6 +31,8 @@ Current sensors include:
 - `Screen`
 - `Volume`
 - `Audio Output Target`
+- `Game Running`
+- `Current Game Title ID`
 - `Player Count`
 - `Player 1 Controller` through `Player 8 Controller`
 

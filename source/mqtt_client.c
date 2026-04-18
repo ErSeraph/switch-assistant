@@ -32,6 +32,8 @@ typedef struct {
     char backlight[16];
     char volume[16];
     char audio_target[24];
+    char game_running[8];
+    char current_game_id[24];
     char player_controller_count[16];
     char player_controller[MAX_PLAYERS][32];
 } SensorSnapshot;
@@ -62,6 +64,10 @@ static void mqtt_set_status(AppState *state, bool dns_ok, bool tcp_ok, bool sess
     strncpy(state->mqtt_last_error, message, sizeof(state->mqtt_last_error) - 1);
     state->mqtt_last_error[sizeof(state->mqtt_last_error) - 1] = '\0';
     mutexUnlock(&state->lock);
+}
+
+static bool is_application_program_id(u64 program_id) {
+    return program_id >= 0x0100000000010000ULL;
 }
 
 static bool parse_port(const char *value, int *port) {
@@ -428,6 +434,92 @@ static void controller_value(char *out, size_t out_size, u32 style) {
     snprintf(out, out_size, "%s", controller_style_name(style));
 }
 
+static void copy_text(char *out, size_t out_size, const char *text) {
+    if (out_size == 0) {
+        return;
+    }
+    size_t len = strnlen(text, out_size - 1);
+    memcpy(out, text, len);
+    out[len] = '\0';
+}
+
+static void set_game_status(AppState *state, const char *fmt, ...) {
+    char message[SHA_LOG_LINE];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    mutexLock(&state->lock);
+    if (strncmp(state->game_status, message, sizeof(state->game_status)) != 0) {
+        copy_text(state->game_status, sizeof(state->game_status), message);
+    }
+    mutexUnlock(&state->lock);
+}
+
+static bool get_program_id_quiet(u64 pid, u64 *program_id) {
+    if (R_SUCCEEDED(pminfoGetProgramId(program_id, pid)) && *program_id != 0) {
+        return true;
+    }
+    return false;
+}
+
+static bool scan_process_list_for_application(AppState *state, u64 *pid_out, u64 *program_id_out) {
+    u64 process_ids[96];
+    s32 process_count = 0;
+    Result rc = svcGetProcessList(&process_count, process_ids, (u32) (sizeof(process_ids) / sizeof(process_ids[0])));
+    if (R_FAILED(rc)) {
+        set_game_status(state, "process list failed rc=0x%x", rc);
+        return false;
+    }
+
+    u64 best_pid = 0;
+    u64 best_program_id = 0;
+    if (process_count > (s32) (sizeof(process_ids) / sizeof(process_ids[0]))) {
+        process_count = (s32) (sizeof(process_ids) / sizeof(process_ids[0]));
+    }
+
+    for (s32 i = 0; i < process_count; ++i) {
+        u64 program_id = 0;
+        if (!get_program_id_quiet(process_ids[i], &program_id)) {
+            continue;
+        }
+        if (!is_application_program_id(program_id)) {
+            continue;
+        }
+        best_pid = process_ids[i];
+        best_program_id = program_id;
+        break;
+    }
+
+    if (best_program_id == 0) {
+        set_game_status(state, "process scan no application count=%d", process_count);
+        return false;
+    }
+
+    *pid_out = best_pid;
+    *program_id_out = best_program_id;
+    return true;
+}
+
+static bool current_game(AppState *state, u64 *application_id) {
+    if (!state->svc_pminfo_ready) {
+        set_game_status(state, "pminfo unavailable");
+        return false;
+    }
+
+    u64 program_id = 0;
+    u64 pid = 0;
+
+    if (scan_process_list_for_application(state, &pid, &program_id)) {
+        *application_id = program_id;
+        set_game_status(state, "running scan=0x%016llx pid=%llu", (unsigned long long) program_id, (unsigned long long) pid);
+        return true;
+    }
+
+    return false;
+}
+
 static void sanitize_id(const char *input, char *output, size_t output_size) {
     size_t j = 0;
     for (size_t i = 0; input[i] && j + 1 < output_size; ++i) {
@@ -571,6 +663,10 @@ static void publish_sensor_discovery(AppState *state, int fd, const AppConfig *c
         publish_discovery_sensor(fd, config, "sensor", "volume", "Volume", NULL, "%", "measurement");
         publish_discovery_sensor(fd, config, "sensor", "audio_target", "Audio Output Target", NULL, NULL, NULL);
     }
+    publish_discovery_sensor(fd, config, "binary_sensor", "game_running", "Game Running", "running", NULL, NULL);
+    publish_discovery_sensor(fd, config, "sensor", "current_game_id", "Current Game Title ID", NULL, NULL, NULL);
+    clear_discovery_topic(fd, config, "sensor", "current_game_name");
+    clear_discovery_topic(fd, config, "sensor", "game_pid");
     if (state->svc_hid_ready) {
         publish_discovery_sensor(fd, config, "sensor", "controller_count", "Player Count", NULL, NULL, "measurement");
         for (int i = 0; i < MAX_PLAYERS; ++i) {
@@ -644,16 +740,6 @@ static void publish_switch_sensors(AppState *state, int fd, const AppConfig *con
         publish_if_changed(fd, config, snapshot, force, "battery_health", snapshot->battery_health, sizeof(snapshot->battery_health), "0");
     }
 
-    bool poll_stable_optional = state->svc_lbl_ready || state->svc_audctl_ready;
-    if (!force && !poll_stable_optional) {
-        return;
-    }
-
-    if (!force) {
-        goto stable_optional_poll;
-    }
-
-stable_optional_poll:
     if (state->svc_lbl_ready) {
         float brightness = 0.0f;
         if (R_SUCCEEDED(lblGetCurrentBrightnessSetting(&brightness)) || R_SUCCEEDED(lblGetBrightnessSettingAppliedToBacklight(&brightness))) {
@@ -694,6 +780,20 @@ stable_optional_poll:
                 }
             }
         }
+    }
+
+    u64 application_id = 0;
+    if (current_game(state, &application_id)) {
+        publish_if_changed(fd, config, snapshot, force, "game_running", snapshot->game_running, sizeof(snapshot->game_running), "ON");
+        if (application_id != 0) {
+            snprintf(value, sizeof(value), "%016llx", (unsigned long long) application_id);
+        } else {
+            snprintf(value, sizeof(value), "unknown");
+        }
+        publish_if_changed(fd, config, snapshot, force, "current_game_id", snapshot->current_game_id, sizeof(snapshot->current_game_id), value);
+    } else {
+        publish_if_changed(fd, config, snapshot, force, "game_running", snapshot->game_running, sizeof(snapshot->game_running), "OFF");
+        publish_if_changed(fd, config, snapshot, force, "current_game_id", snapshot->current_game_id, sizeof(snapshot->current_game_id), "none");
     }
 
     HidNpadIdType player_ids[] = {
