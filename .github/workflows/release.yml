@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - "v*"
+      - "[0-9]*"
 
 permissions:
   contents: write
@@ -22,9 +23,16 @@ jobs:
           set -euo pipefail
           docker pull devkitpro/devkita64
           docker run --rm -v "$PWD:/workspace" -w /workspace/sysmodule devkitpro/devkita64 /bin/bash -lc "make install-layout"
+          docker run --rm -v "$PWD:/workspace" -w /workspace/overlay devkitpro/devkita64 /bin/bash -lc "make"
+          docker run --rm -v "$PWD:/workspace" -w /workspace/overlay-loader devkitpro/devkita64 /bin/bash -lc "make install-layout"
           mkdir -p romfs/sysmodule
           cp sysmodule/atmosphere/contents/0100000000000F12/exefs.nsp romfs/sysmodule/exefs.nsp
           : > romfs/sysmodule/boot2.flag
+          mkdir -p romfs/overlay-loader
+          cp overlay-loader/atmosphere/contents/0100000000000F13/exefs.nsp romfs/overlay-loader/exefs.nsp
+          : > romfs/overlay-loader/boot2.flag
+          mkdir -p romfs/overlay
+          cp overlay/switch-ha-overlay.ovl romfs/overlay/switch-ha-overlay.ovl
           rm -rf build switch-ha.elf switch-ha.nro
           docker run --rm -v "$PWD:/workspace" -w /workspace devkitpro/devkita64 /bin/bash -lc "make"
 
