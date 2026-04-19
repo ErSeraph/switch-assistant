@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #define NOTIFICATION_PATH "sdmc:/switch/switch-ha/notification-current.ini"
 #define LOG_PATH "sdmc:/switch/switch-ha/overlay.log"
@@ -323,6 +324,12 @@ static bool read_notification(Notification *notification) {
     return true;
 }
 
+static void consume_notification_file(void) {
+    if (remove(NOTIFICATION_PATH) != 0 && errno != ENOENT) {
+        append_log("notification consume failed", errno);
+    }
+}
+
 static Result init_graphics(void) {
     Result rc = 0;
     append_log("graphics init begin", 0);
@@ -576,6 +583,7 @@ int main(int argc, char **argv) {
         if (read_notification(&current) && strcmp(current.id, last_id) != 0) {
             active = current;
             snprintf(last_id, sizeof(last_id), "%s", current.id);
+            consume_notification_file();
             showing = true;
             show_started_ms = monotonic_ms();
             append_log("notification displayed", 0);
