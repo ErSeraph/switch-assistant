@@ -264,3 +264,9 @@ The script:
 ## Credits
 
 The overlay loader is derived from the ISC-licensed `nx-ovlloader` project and chainloads the Switch Assistant overlay directly instead of Tesla Menu.
+
+## License
+
+Switch Assistant is licensed under the [MIT License](LICENSE).
+
+The overlay loader includes code derived from `nx-ovlloader`, which is licensed under the ISC License.
