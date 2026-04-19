@@ -52,9 +52,9 @@ all:
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
 install-layout: all
-	@mkdir -p atmosphere/contents/0100000000000F12/flags
-	@cp $(TARGET).nsp atmosphere/contents/0100000000000F12/exefs.nsp
-	@touch atmosphere/contents/0100000000000F12/flags/boot2.flag
+	@mkdir -p atmosphere/contents/00FF000053484101/flags
+	@cp $(TARGET).nsp atmosphere/contents/00FF000053484101/exefs.nsp
+	@touch atmosphere/contents/00FF000053484101/flags/boot2.flag
 
 clean:
 	@echo clean ...

@@ -47,7 +47,7 @@ if errorlevel 1 (
 )
 
 if not exist "%ROOT%\romfs\sysmodule" mkdir "%ROOT%\romfs\sysmodule"
-copy /Y "%ROOT%\sysmodule\atmosphere\contents\0100000000000F12\exefs.nsp" "%ROOT%\romfs\sysmodule\exefs.nsp" >nul
+copy /Y "%ROOT%\sysmodule\atmosphere\contents\00FF000053484101\exefs.nsp" "%ROOT%\romfs\sysmodule\exefs.nsp" >nul
 if errorlevel 1 (
     echo Failed to stage sysmodule exefs.nsp into romfs.
     exit /b 1
@@ -55,7 +55,7 @@ if errorlevel 1 (
 type nul > "%ROOT%\romfs\sysmodule\boot2.flag"
 
 if not exist "%ROOT%\romfs\overlay-loader" mkdir "%ROOT%\romfs\overlay-loader"
-copy /Y "%ROOT%\overlay-loader\atmosphere\contents\0100000000000F13\exefs.nsp" "%ROOT%\romfs\overlay-loader\exefs.nsp" >nul
+copy /Y "%ROOT%\overlay-loader\atmosphere\contents\00FF000053484102\exefs.nsp" "%ROOT%\romfs\overlay-loader\exefs.nsp" >nul
 if errorlevel 1 (
     echo Failed to stage overlay loader exefs.nsp into romfs.
     exit /b 1

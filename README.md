@@ -58,8 +58,8 @@ The `.nro` app is only used for setup and configuration. After rebooting, the sy
 4. On first launch, the app creates the required folders and installs:
 
    ```text
-   sdmc:/atmosphere/contents/0100000000000F12
-   sdmc:/atmosphere/contents/0100000000000F13
+   sdmc:/atmosphere/contents/00FF000053484101
+   sdmc:/atmosphere/contents/00FF000053484102
    sdmc:/switch/switch-ha/switch-ha-overlay.ovl
    sdmc:/switch/switch-ha/config.ini
    ```
@@ -258,8 +258,8 @@ The script:
 | `sdmc:/switch/switch-ha/sysmodule.log` | Sysmodule log. |
 | `sdmc:/switch/switch-ha/sysmodule-heartbeat.txt` | Sysmodule diagnostic state. |
 | `sdmc:/switch/switch-ha/notifications.log` | Short notification history. |
-| `sdmc:/atmosphere/contents/0100000000000F12` | Switch Assistant sysmodule. |
-| `sdmc:/atmosphere/contents/0100000000000F13` | Switch Assistant overlay loader. |
+| `sdmc:/atmosphere/contents/00FF000053484101` | Switch Assistant sysmodule. |
+| `sdmc:/atmosphere/contents/00FF000053484102` | Switch Assistant overlay loader. |
 
 ## Credits
 

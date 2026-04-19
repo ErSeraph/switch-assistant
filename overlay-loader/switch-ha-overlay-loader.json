@@ -1,8 +1,8 @@
 {
 	"name":	"switch-ha-overlay-loader",
-	"title_id":	"0x0100000000000F13",
-	"title_id_range_min":	"0x0100000000000F13",
-	"title_id_range_max":	"0x0100000000000F13",
+	"title_id":	"0x00FF000053484102",
+	"title_id_range_min":	"0x00FF000053484102",
+	"title_id_range_max":	"0x00FF000053484102",
 	"main_thread_stack_size":	"0x30000",
 	"main_thread_priority":	49,
 	"default_cpu_id":	3,
