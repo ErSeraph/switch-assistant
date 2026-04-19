@@ -45,6 +45,12 @@ static bool prompt_number(const char *guide, int *value) {
     return true;
 }
 
+static int clamp_startup_delay(int value) {
+    if (value < 0) return 0;
+    if (value > 300) return 300;
+    return value;
+}
+
 static void save_config_with_status(AppState *state, const AppConfig *config) {
     if (config_save(config)) {
         mutexLock(&state->lock);
@@ -99,6 +105,10 @@ static void draw_ui(AppState *state, int selected) {
     printf("%s Client ID : %s\n", cursor(selected, 8), state->config.mqtt_client_id[0] ? state->config.mqtt_client_id : state->config.device_name);
     printf("\n");
 
+    printf(C_BOLD "System" C_RESET "\n");
+    printf("%s Boot Delay: %d sec\n", cursor(selected, 9), state->config.startup_delay_seconds);
+    printf("\n");
+
     printf(C_BOLD "Status" C_RESET "  " C_DIM "config %s" C_RESET "\n", state->config_status);
     printf("  %s HA test   %s MQTT test\n",
            flag(state->ha_validated),
@@ -124,7 +134,7 @@ void ui_run(AppState *state) {
     padInitializeDefault(&pad);
 
     int selected = 0;
-    const int field_count = 9;
+    const int field_count = 10;
 
     while (appletMainLoop()) {
         padUpdate(&pad);
@@ -189,6 +199,10 @@ void ui_run(AppState *state) {
                     break;
                 case 8:
                     changed = prompt_text("MQTT client ID", tmp.mqtt_client_id, sizeof(tmp.mqtt_client_id), false);
+                    break;
+                case 9:
+                    changed = prompt_number("Boot delay seconds (0-300)", &tmp.startup_delay_seconds);
+                    tmp.startup_delay_seconds = clamp_startup_delay(tmp.startup_delay_seconds);
                     break;
             }
 

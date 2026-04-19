@@ -12,14 +12,15 @@
 #define LOG_PATH "sdmc:/switch/switch-ha/sysmodule.log"
 #define OPTIONAL_INIT_TIMEOUT_NS (1500ULL * 1000ULL * 1000ULL)
 #define RESULT_OPTIONAL_TIMEOUT MAKERESULT(Module_Libnx, LibnxError_Timeout)
+#define RESULT_NOT_INITIALIZED MAKERESULT(Module_Libnx, LibnxError_NotInitialized)
 
-static Result g_socket_init_result = 0;
-static Result g_psm_init_result = 0;
-static Result g_spsm_init_result = 0;
-static Result g_hid_init_result = 0;
-static Result g_lbl_init_result = 0;
-static Result g_audctl_init_result = 0;
-static Result g_pminfo_init_result = 0;
+static Result g_socket_init_result = RESULT_NOT_INITIALIZED;
+static Result g_psm_init_result = RESULT_NOT_INITIALIZED;
+static Result g_spsm_init_result = RESULT_NOT_INITIALIZED;
+static Result g_hid_init_result = RESULT_NOT_INITIALIZED;
+static Result g_lbl_init_result = RESULT_NOT_INITIALIZED;
+static Result g_audctl_init_result = RESULT_NOT_INITIALIZED;
+static Result g_pminfo_init_result = RESULT_NOT_INITIALIZED;
 
 u32 __nx_applet_type = AppletType_None;
 u32 __nx_fs_num_sessions = 1;
@@ -45,21 +46,6 @@ void __appInit(void) {
     }
     fsdevMountSdmc();
 
-    SocketInitConfig socket_config = {
-        .tcp_tx_buf_size = 0x8000,
-        .tcp_rx_buf_size = 0x8000,
-        .tcp_tx_buf_max_size = 0,
-        .tcp_rx_buf_max_size = 0,
-        .udp_tx_buf_size = 0x2400,
-        .udp_rx_buf_size = 0xA500,
-        .sb_efficiency = 4,
-        .num_bsd_sessions = 3,
-        .bsd_service_type = BsdServiceType_System,
-    };
-    g_socket_init_result = socketInitialize(&socket_config);
-    g_psm_init_result = psmInitialize();
-    g_spsm_init_result = spsmInitialize();
-
     smExit();
 }
 
@@ -69,8 +55,8 @@ void __appExit(void) {
     if (R_SUCCEEDED(g_lbl_init_result)) lblExit();
     if (R_SUCCEEDED(g_hid_init_result)) hidExit();
     if (R_SUCCEEDED(g_spsm_init_result)) spsmExit();
-    psmExit();
-    socketExit();
+    if (R_SUCCEEDED(g_psm_init_result)) psmExit();
+    if (R_SUCCEEDED(g_socket_init_result)) socketExit();
     fsdevUnmountAll();
     fsExit();
 }
@@ -92,6 +78,52 @@ static void append_log_result(const char *name, Result rc) {
     char line[96];
     snprintf(line, sizeof(line), "%s=0x%x", name, rc);
     append_log(line);
+}
+
+static void init_core_services(AppState *state) {
+    append_log("core service init start");
+
+    Result rc = smInitialize();
+    if (R_FAILED(rc)) {
+        append_log_result("sm_init", rc);
+        return;
+    }
+
+    SocketInitConfig socket_config = {
+        .tcp_tx_buf_size = 0x8000,
+        .tcp_rx_buf_size = 0x8000,
+        .tcp_tx_buf_max_size = 0,
+        .tcp_rx_buf_max_size = 0,
+        .udp_tx_buf_size = 0x2400,
+        .udp_rx_buf_size = 0xA500,
+        .sb_efficiency = 4,
+        .num_bsd_sessions = 3,
+        .bsd_service_type = BsdServiceType_System,
+    };
+    g_socket_init_result = socketInitialize(&socket_config);
+    append_log_result("socket_init", g_socket_init_result);
+
+    g_psm_init_result = psmInitialize();
+    append_log_result("psm_init", g_psm_init_result);
+
+    g_spsm_init_result = spsmInitialize();
+    state->svc_spsm_ready = R_SUCCEEDED(g_spsm_init_result);
+    append_log_result("spsm_init", g_spsm_init_result);
+
+    smExit();
+    append_log("core service init done");
+}
+
+static void apply_startup_delay(const AppConfig *config) {
+    if (config->startup_delay_seconds <= 0) {
+        return;
+    }
+
+    char line[96];
+    snprintf(line, sizeof(line), "startup delay %d sec", config->startup_delay_seconds);
+    append_log(line);
+    svcSleepThread((u64) config->startup_delay_seconds * 1000ULL * 1000ULL * 1000ULL);
+    append_log("startup delay done");
 }
 
 typedef enum {
@@ -234,9 +266,7 @@ int main(int argc, char **argv) {
     AppState state;
     app_state_init(&state);
     state.app_mode = AppMode_Sysmodule;
-    state.svc_spsm_ready = R_SUCCEEDED(g_spsm_init_result);
     append_log("sysmodule boot");
-    init_optional_services(&state);
 
     if (!config_load(&state.config)) {
         snprintf(state.config_status, sizeof(state.config_status), "no config");
@@ -247,6 +277,10 @@ int main(int argc, char **argv) {
         app_state_push_log(&state, "Config loaded");
         append_log("config loaded");
     }
+
+    apply_startup_delay(&state.config);
+    init_core_services(&state);
+    init_optional_services(&state);
 
     mqtt_service_start(&state);
     append_log("mqtt thread started");

@@ -53,6 +53,16 @@ static void config_generate_client_id(AppConfig *config) {
     snprintf(config->mqtt_client_id, sizeof(config->mqtt_client_id), "switch-ha-%08x", suffix);
 }
 
+static int clamp_startup_delay(int value) {
+    if (value < 0) {
+        return 0;
+    }
+    if (value > 300) {
+        return 300;
+    }
+    return value;
+}
+
 void config_set_defaults(AppConfig *config) {
     memset(config, 0, sizeof(*config));
     snprintf(config->ha_url, sizeof(config->ha_url), "http://homeassistant.local:8123");
@@ -60,6 +70,7 @@ void config_set_defaults(AppConfig *config) {
     config->mqtt_port = 1883;
     snprintf(config->mqtt_topic_prefix, sizeof(config->mqtt_topic_prefix), "homeassistant");
     snprintf(config->device_name, sizeof(config->device_name), "Nintendo Switch");
+    config->startup_delay_seconds = 0;
     config_generate_client_id(config);
 }
 
@@ -103,6 +114,8 @@ bool config_load(AppConfig *config) {
             strncpy(config->mqtt_client_id, value, sizeof(config->mqtt_client_id) - 1);
         } else if (strcmp(key, "device_name") == 0) {
             strncpy(config->device_name, value, sizeof(config->device_name) - 1);
+        } else if (strcmp(key, "startup_delay_seconds") == 0) {
+            config->startup_delay_seconds = clamp_startup_delay(atoi(value));
         }
     }
 
@@ -131,6 +144,7 @@ bool config_save(const AppConfig *config) {
     fprintf(file, "mqtt_topic_prefix=%s\n", config->mqtt_topic_prefix);
     fprintf(file, "mqtt_client_id=%s\n", config->mqtt_client_id);
     fprintf(file, "device_name=%s\n", config->device_name);
+    fprintf(file, "startup_delay_seconds=%d\n", clamp_startup_delay(config->startup_delay_seconds));
 
     if (fflush(file) != 0) {
         set_error("flush config failed");

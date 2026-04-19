@@ -24,6 +24,7 @@ typedef struct {
     char mqtt_topic_prefix[SHA_MAX_TOPIC];
     char mqtt_client_id[64];
     char device_name[64];
+    int startup_delay_seconds;
 } AppConfig;
 
 typedef struct {

@@ -95,6 +95,7 @@ Fields to fill in:
 | `Discovery` | `homeassistant` | Standard MQTT Discovery prefix. |
 | `Name` | `Nintendo Switch` | Device name shown in Home Assistant. |
 | `Client ID` | `switch-ha-xxxxxxxx` | Generated automatically, editable if needed. |
+| `Boot Delay` | `0` | Seconds to wait before the sysmodule starts system services. Use only if your setup crashes during boot. |
 
 The Home Assistant token can be long. If entering it on the console is inconvenient, open the app once, then edit this file from your PC:
 
@@ -223,6 +224,36 @@ Check that:
 The test runs from the `.nro` app. Sensors are published by the sysmodule only after rebooting.
 
 Press `-` in the app or reboot the console manually.
+
+### Console crashes during boot
+
+Some custom Atmosphere packs may crash if boot2 sysmodules start system services too early.
+
+If the console fails to boot after installing Switch Assistant:
+
+1. Power off the console.
+2. Put the SD card in a PC.
+3. Remove these folders if they exist:
+
+   ```text
+   sdmc:/atmosphere/contents/00FF000053484101
+   sdmc:/atmosphere/contents/00FF000053484102
+   ```
+
+4. Put the SD card back in the console and boot normally.
+5. Launch `Switch Assistant` from the Homebrew Menu.
+6. Set `Boot Delay` to `30` seconds.
+7. Press `-` in the app or reboot the console manually.
+
+If the console still crashes, repeat the recovery steps and try a higher value such as `60` seconds.
+
+`Boot Delay` is saved in:
+
+```ini
+startup_delay_seconds=30
+```
+
+The default is `0`, which keeps startup immediate on standard Atmosphere setups.
 
 ### Notifications do not appear
 
