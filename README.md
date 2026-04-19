@@ -159,16 +159,20 @@ data:
   message: "Laundry finished"
 ```
 
-You can also send a title and message:
+The MQTT notify integration currently forwards the message body to Switch Assistant. Home Assistant's `title`
+field is not included in that MQTT payload, so the popup title defaults to `Home Assistant` when using
+`notify.send_message`.
+
+To send a custom title, publish directly to the popup topic with either JSON:
 
 ```yaml
-action: notify.send_message
-target:
-  entity_id: notify.nintendo_switch_popup_notification
+action: mqtt.publish
 data:
-  title: "Home Assistant"
-  message: "The washing machine has finished"
+  topic: switch_ha/<client_id>/notify/popup
+  payload: '{"title":"Laundry","message":"The washing machine has finished"}'
 ```
+
+or a two-line payload where the first line is the title and the second line is the message.
 
 The sysmodule writes the latest notification here:
 

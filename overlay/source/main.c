@@ -136,6 +136,148 @@ static void trim_eol(char *value) {
     }
 }
 
+static bool utf8_next(const char **ptr, u32 *cp) {
+    const unsigned char *s = (const unsigned char *) *ptr;
+    if (s[0] == '\0') {
+        return false;
+    }
+
+    if (s[0] < 0x80) {
+        *cp = s[0];
+        *ptr += 1;
+        return true;
+    }
+    if ((s[0] & 0xE0) == 0xC0 && (s[1] & 0xC0) == 0x80) {
+        *cp = ((u32) (s[0] & 0x1F) << 6) | (u32) (s[1] & 0x3F);
+        *ptr += 2;
+        return true;
+    }
+    if ((s[0] & 0xF0) == 0xE0 && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80) {
+        *cp = ((u32) (s[0] & 0x0F) << 12) | ((u32) (s[1] & 0x3F) << 6) | (u32) (s[2] & 0x3F);
+        *ptr += 3;
+        return true;
+    }
+    if ((s[0] & 0xF8) == 0xF0 && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80 && (s[3] & 0xC0) == 0x80) {
+        *cp = ((u32) (s[0] & 0x07) << 18) | ((u32) (s[1] & 0x3F) << 12) | ((u32) (s[2] & 0x3F) << 6) | (u32) (s[3] & 0x3F);
+        *ptr += 4;
+        return true;
+    }
+
+    *cp = '?';
+    *ptr += 1;
+    return true;
+}
+
+static void append_ascii(char *out, size_t out_size, size_t *used, const char *text) {
+    while (*text && *used + 1 < out_size) {
+        out[(*used)++] = *text++;
+    }
+}
+
+static const char *latin_ascii(u32 cp) {
+    switch (cp) {
+        case 0x00C0: case 0x00C1: case 0x00C2: case 0x00C3: case 0x00C4: case 0x00C5: case 0x0100: case 0x0102: case 0x0104: return "A";
+        case 0x00E0: case 0x00E1: case 0x00E2: case 0x00E3: case 0x00E4: case 0x00E5: case 0x0101: case 0x0103: case 0x0105: return "a";
+        case 0x00C7: case 0x0106: case 0x0108: case 0x010A: case 0x010C: return "C";
+        case 0x00E7: case 0x0107: case 0x0109: case 0x010B: case 0x010D: return "c";
+        case 0x010E: case 0x0110: return "D";
+        case 0x010F: case 0x0111: return "d";
+        case 0x00C8: case 0x00C9: case 0x00CA: case 0x00CB: case 0x0112: case 0x0114: case 0x0116: case 0x0118: case 0x011A: return "E";
+        case 0x00E8: case 0x00E9: case 0x00EA: case 0x00EB: case 0x0113: case 0x0115: case 0x0117: case 0x0119: case 0x011B: return "e";
+        case 0x00CC: case 0x00CD: case 0x00CE: case 0x00CF: case 0x0128: case 0x012A: case 0x012C: case 0x012E: return "I";
+        case 0x00EC: case 0x00ED: case 0x00EE: case 0x00EF: case 0x0129: case 0x012B: case 0x012D: case 0x012F: return "i";
+        case 0x00D1: case 0x0143: case 0x0147: return "N";
+        case 0x00F1: case 0x0144: case 0x0148: return "n";
+        case 0x00D2: case 0x00D3: case 0x00D4: case 0x00D5: case 0x00D6: case 0x00D8: case 0x014C: case 0x014E: return "O";
+        case 0x00F2: case 0x00F3: case 0x00F4: case 0x00F5: case 0x00F6: case 0x00F8: case 0x014D: case 0x014F: return "o";
+        case 0x0160: return "S";
+        case 0x0161: return "s";
+        case 0x00D9: case 0x00DA: case 0x00DB: case 0x00DC: case 0x0168: case 0x016A: case 0x016C: case 0x016E: return "U";
+        case 0x00F9: case 0x00FA: case 0x00FB: case 0x00FC: case 0x0169: case 0x016B: case 0x016D: case 0x016F: return "u";
+        case 0x00DD: case 0x0178: return "Y";
+        case 0x00FD: case 0x00FF: return "y";
+        case 0x017D: return "Z";
+        case 0x017E: return "z";
+        case 0x00C6: return "AE";
+        case 0x00E6: return "ae";
+        case 0x00DF: return "ss";
+        default: return NULL;
+    }
+}
+
+static const char *cyrillic_ascii(u32 cp) {
+    switch (cp) {
+        case 0x0410: return "A"; case 0x0430: return "a";
+        case 0x0411: return "B"; case 0x0431: return "b";
+        case 0x0412: return "V"; case 0x0432: return "v";
+        case 0x0413: return "G"; case 0x0433: return "g";
+        case 0x0414: return "D"; case 0x0434: return "d";
+        case 0x0415: case 0x0401: return "E"; case 0x0435: case 0x0451: return "e";
+        case 0x0416: return "Zh"; case 0x0436: return "zh";
+        case 0x0417: return "Z"; case 0x0437: return "z";
+        case 0x0418: return "I"; case 0x0438: return "i";
+        case 0x0419: return "Y"; case 0x0439: return "y";
+        case 0x041A: return "K"; case 0x043A: return "k";
+        case 0x041B: return "L"; case 0x043B: return "l";
+        case 0x041C: return "M"; case 0x043C: return "m";
+        case 0x041D: return "N"; case 0x043D: return "n";
+        case 0x041E: return "O"; case 0x043E: return "o";
+        case 0x041F: return "P"; case 0x043F: return "p";
+        case 0x0420: return "R"; case 0x0440: return "r";
+        case 0x0421: return "S"; case 0x0441: return "s";
+        case 0x0422: return "T"; case 0x0442: return "t";
+        case 0x0423: return "U"; case 0x0443: return "u";
+        case 0x0424: return "F"; case 0x0444: return "f";
+        case 0x0425: return "Kh"; case 0x0445: return "kh";
+        case 0x0426: return "Ts"; case 0x0446: return "ts";
+        case 0x0427: return "Ch"; case 0x0447: return "ch";
+        case 0x0428: return "Sh"; case 0x0448: return "sh";
+        case 0x0429: return "Shch"; case 0x0449: return "shch";
+        case 0x042A: case 0x044A: return "";
+        case 0x042B: return "Y"; case 0x044B: return "y";
+        case 0x042C: case 0x044C: return "";
+        case 0x042D: return "E"; case 0x044D: return "e";
+        case 0x042E: return "Yu"; case 0x044E: return "yu";
+        case 0x042F: return "Ya"; case 0x044F: return "ya";
+        default: return NULL;
+    }
+}
+
+static void normalize_display_text(char *value, size_t value_size) {
+    char normalized[512];
+    size_t used = 0;
+    const char *ptr = value;
+    u32 cp = 0;
+
+    while (utf8_next(&ptr, &cp) && used + 1 < sizeof(normalized)) {
+        if (cp == '\n' || cp == '\r' || cp == '\t') {
+            append_ascii(normalized, sizeof(normalized), &used, " ");
+        } else if (cp >= 0x20 && cp <= 0x7E) {
+            char ch[2] = {(char) cp, '\0'};
+            append_ascii(normalized, sizeof(normalized), &used, ch);
+        } else {
+            const char *mapped = latin_ascii(cp);
+            if (!mapped) mapped = cyrillic_ascii(cp);
+            if (mapped) {
+                append_ascii(normalized, sizeof(normalized), &used, mapped);
+            } else if (cp == 0x2018 || cp == 0x2019) {
+                append_ascii(normalized, sizeof(normalized), &used, "'");
+            } else if (cp == 0x201C || cp == 0x201D) {
+                append_ascii(normalized, sizeof(normalized), &used, "\"");
+            } else if (cp == 0x2013 || cp == 0x2014) {
+                append_ascii(normalized, sizeof(normalized), &used, "-");
+            } else if (cp == 0x2026) {
+                append_ascii(normalized, sizeof(normalized), &used, "...");
+            } else {
+                append_ascii(normalized, sizeof(normalized), &used, "?");
+            }
+        }
+    }
+
+    normalized[used] = '\0';
+    snprintf(value, value_size, "%s", normalized);
+}
+
 static bool read_notification(Notification *notification) {
     FILE *file = fopen(NOTIFICATION_PATH, "r");
     if (!file) {
@@ -173,6 +315,9 @@ static bool read_notification(Notification *notification) {
     if (current.id[0] == '\0' || current.message[0] == '\0') {
         return false;
     }
+
+    normalize_display_text(current.title, sizeof(current.title));
+    normalize_display_text(current.message, sizeof(current.message));
 
     *notification = current;
     return true;

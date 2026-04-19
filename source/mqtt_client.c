@@ -465,6 +465,48 @@ static void trim_text(char *value) {
     }
 }
 
+static int hex_value(char ch) {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+
+static bool read_json_hex4(const char *pos, u32 *out) {
+    u32 value = 0;
+    for (int i = 0; i < 4; ++i) {
+        int digit = hex_value(pos[i]);
+        if (digit < 0) {
+            return false;
+        }
+        value = (value << 4) | (u32) digit;
+    }
+    *out = value;
+    return true;
+}
+
+static void append_utf8(char *out, size_t out_size, size_t *used, u32 cp) {
+    if (*used + 1 >= out_size) {
+        return;
+    }
+
+    if (cp <= 0x7F) {
+        out[(*used)++] = (char) cp;
+    } else if (cp <= 0x7FF && *used + 2 < out_size) {
+        out[(*used)++] = (char) (0xC0 | ((cp >> 6) & 0x1F));
+        out[(*used)++] = (char) (0x80 | (cp & 0x3F));
+    } else if (cp <= 0xFFFF && *used + 3 < out_size) {
+        out[(*used)++] = (char) (0xE0 | ((cp >> 12) & 0x0F));
+        out[(*used)++] = (char) (0x80 | ((cp >> 6) & 0x3F));
+        out[(*used)++] = (char) (0x80 | (cp & 0x3F));
+    } else if (cp <= 0x10FFFF && *used + 4 < out_size) {
+        out[(*used)++] = (char) (0xF0 | ((cp >> 18) & 0x07));
+        out[(*used)++] = (char) (0x80 | ((cp >> 12) & 0x3F));
+        out[(*used)++] = (char) (0x80 | ((cp >> 6) & 0x3F));
+        out[(*used)++] = (char) (0x80 | (cp & 0x3F));
+    }
+}
+
 static bool json_extract_string(const char *json, const char *key, char *out, size_t out_size) {
     char pattern[40];
     snprintf(pattern, sizeof(pattern), "\"%s\"", key);
@@ -489,16 +531,35 @@ static bool json_extract_string(const char *json, const char *key, char *out, si
                 case 'n': out[used++] = ' '; break;
                 case 'r': out[used++] = ' '; break;
                 case 't': out[used++] = ' '; break;
+                case 'u': {
+                    u32 cp = 0;
+                    if (read_json_hex4(pos + 1, &cp)) {
+                        pos += 5;
+                        if (cp >= 0xD800 && cp <= 0xDBFF && pos[0] == '\\' && pos[1] == 'u') {
+                            u32 low = 0;
+                            if (read_json_hex4(pos + 2, &low) && low >= 0xDC00 && low <= 0xDFFF) {
+                                cp = 0x10000 + (((cp - 0xD800) << 10) | (low - 0xDC00));
+                                pos += 6;
+                            }
+                        }
+                        append_utf8(out, out_size, &used, cp);
+                    } else {
+                        out[used++] = 'u';
+                        pos++;
+                    }
+                    break;
+                }
                 case '"':
                 case '\\':
                 case '/':
                     out[used++] = *pos;
+                    pos++;
                     break;
                 default:
                     out[used++] = *pos;
+                    pos++;
                     break;
             }
-            pos++;
         } else {
             out[used++] = *pos++;
         }
