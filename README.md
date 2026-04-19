@@ -1,138 +1,155 @@
 # Switch Assistant
 
-Switch Assistant is a Nintendo Switch homebrew app that connects your console to Home Assistant through MQTT.
+<p align="center">
+  <img src="img/logo.png" alt="Switch Assistant logo" width="220">
+</p>
 
-The project has three parts:
+<p align="center">
+  <a href="https://github.com/ErSeraph/switch-assistant/releases"><img alt="Download" src="https://img.shields.io/badge/download-release-2ea44f?style=for-the-badge"></a>
+  <img alt="Nintendo Switch" src="https://img.shields.io/badge/Nintendo%20Switch-homebrew-e60012?style=for-the-badge">
+  <img alt="Home Assistant" src="https://img.shields.io/badge/Home%20Assistant-MQTT-41bdf5?style=for-the-badge">
+</p>
 
-- `switch-ha.nro`: the foreground configuration app.
-- Atmosphere sysmodule: the background process that publishes sensors to MQTT.
-- Switch Assistant overlay loader and overlay: the background visual layer that shows Home Assistant notifications.
+Switch Assistant connects your Nintendo Switch to Home Assistant through MQTT.
 
-The NRO is only used to configure the app, test the connection, and install or update the bundled sysmodule. The NRO does not publish sensors while closed. The sysmodule reads the saved configuration and runs in the background after a console reboot.
+Once configured, it publishes console sensors to Home Assistant and shows Home Assistant popup notifications directly over your game, without opening Tesla Menu.
 
-## Features
+## What It Does
 
-- Local configuration UI on the Switch.
-- Automatic sysmodule installation from the NRO.
-- Home Assistant MQTT discovery.
-- Retained MQTT state publishing.
-- Sensor updates when values change.
-- Home Assistant and MQTT connection test from the NRO.
-- Reboot and shutdown buttons exposed to Home Assistant.
-- Automatic popup notifications from Home Assistant.
+- Shows battery, charging state, temperature, brightness, volume, and connected controllers in Home Assistant.
+- Reports whether a game is running and publishes the current game Title ID.
+- Exposes reboot and shutdown buttons in Home Assistant.
+- Sends Home Assistant popup notifications to the Switch.
+- Provides a simple Homebrew configuration app on the console.
+- Uses MQTT Discovery so entities appear automatically in Home Assistant.
 
-Current sensors include:
+## How It Works
 
-- `Battery Level`
-- `Is Charging`
-- `Charger Type`
-- `Battery Voltage`
-- `Battery Temperature`
-- `Battery Health`
-- `Screen Brightness`
-- `Screen`
-- `Volume`
-- `Audio Output Target`
-- `Game Running`
-- `Current Game Title ID`
-- `Player Count`
-- `Player 1 Controller` through `Player 8 Controller`
+The project installs three components:
 
-## Installation
+| Component | Purpose |
+| --- | --- |
+| `switch-ha.nro` | Homebrew app used for configuration, connection tests, and automatic installation. |
+| Atmosphere sysmodule | Background process that publishes sensors and receives MQTT commands. |
+| Notification overlay | Shows Home Assistant popups over the currently running game. |
 
-Download `switch-ha.nro` from the releases page and copy the NRO to your SD card:
+The `.nro` app is only used for setup and configuration. After rebooting, the sysmodule handles the background MQTT work.
 
-```text
-sdmc:/switch/switch-ha/switch-ha.nro
-```
+## Requirements
 
-Launch `Switch Assistant` from the Homebrew Menu.
+- Nintendo Switch running Atmosphere.
+- Working Homebrew Menu.
+- Home Assistant already installed.
+- An MQTT broker reachable from the Switch, such as Mosquitto.
+- A network where the Switch and MQTT broker can communicate with each other.
 
-On startup, the NRO creates the required folders and installs or updates the bundled MQTT sysmodule here:
+> Important: the sysmodule supports plain TCP MQTT, usually on port `1883`. It does not support TLS on `8883`, MQTT over WebSocket, or mDNS hostnames such as `homeassistant.local` for the MQTT broker.
 
-```text
-sdmc:/atmosphere/contents/0100000000000F12
-```
+## Quick Installation
 
-It also installs the notification overlay loader and overlay here:
+1. Download `switch-ha.nro` from the latest [release](https://github.com/ErSeraph/switch-assistant/releases).
+2. Copy the file to your SD card:
 
-```text
-sdmc:/atmosphere/contents/0100000000000F13
-sdmc:/switch/switch-ha/switch-ha-overlay.ovl
-```
+   ```text
+   sdmc:/switch/switch-ha/switch-ha.nro
+   ```
 
-If no configuration file exists, the app creates:
+3. Launch `Switch Assistant` from the Homebrew Menu.
+4. On first launch, the app creates the required folders and installs:
+
+   ```text
+   sdmc:/atmosphere/contents/0100000000000F12
+   sdmc:/atmosphere/contents/0100000000000F13
+   sdmc:/switch/switch-ha/switch-ha-overlay.ovl
+   sdmc:/switch/switch-ha/config.ini
+   ```
+
+5. Enter your Home Assistant and MQTT settings.
+6. Press `Y` to test the connection.
+7. Press `-` to reboot the console.
+
+After the reboot, Home Assistant should automatically discover the new MQTT entities.
+
+## Configuration On The Switch
+
+On the main screen:
+
+| Button | Action |
+| --- | --- |
+| `D-Pad` | Select a field. |
+| `A` | Edit the selected field. |
+| `Y` | Test Home Assistant and MQTT. |
+| `-` | Reboot the console to apply changes. |
+| `+` | Exit the app. |
+
+Fields to fill in:
+
+| Field | Example | Notes |
+| --- | --- | --- |
+| `HA URL` | `http://192.168.1.10:8123` | Your Home Assistant URL. |
+| `HA Token` | long-lived token | Your Home Assistant long-lived access token. |
+| `MQTT Host IP` | `192.168.1.10` | Use the broker IP address, not `homeassistant.local`. |
+| `MQTT Port` | `1883` | Do not use `8123`: that is the Home Assistant web port. |
+| `MQTT Username` | `mqtt_user` | MQTT broker username. |
+| `MQTT Password` | `password` | MQTT broker password. |
+| `Discovery` | `homeassistant` | Standard MQTT Discovery prefix. |
+| `Name` | `Nintendo Switch` | Device name shown in Home Assistant. |
+| `Client ID` | `switch-ha-xxxxxxxx` | Generated automatically, editable if needed. |
+
+The Home Assistant token can be long. If entering it on the console is inconvenient, open the app once, then edit this file from your PC:
 
 ```text
 sdmc:/switch/switch-ha/config.ini
 ```
 
-Open the app once, configure Home Assistant and MQTT, then reboot the console. The sysmodule and overlay are loaded by Atmosphere after reboot.
+After changing any configuration value, reboot the console so the sysmodule reloads the file.
 
-The Home Assistant long-lived access token can be lengthy. After the app creates `config.ini`, you can connect the SD card to a PC and edit the file directly if that is more convenient than typing the token on the console.
+## Create A Home Assistant Token
 
-The default config uses:
+1. Open Home Assistant.
+2. Open your user profile.
+3. Scroll down to **Long-lived access tokens**.
+4. Create a new token.
+5. Copy it into the `HA Token` field or into `config.ini`.
 
-- MQTT port `1883`
-- MQTT discovery prefix `homeassistant`
-- device name `Nintendo Switch`
-- an auto-generated client ID like `switch-ha-xxxxxxxx`
+## MQTT In Home Assistant
 
-After the first launch, you can either edit settings from the NRO UI or edit `config.ini` directly from a PC. Manual editing is only available after the app has created the config file and folders.
-
-## Configuration
-
-Use the D-Pad to select a field, press `A` to edit it, and save happens automatically after each edit.
-
-Required fields:
-
-- `HA URL`: your Home Assistant URL, for example `http://192.168.1.10:8123`.
-- `HA Token`: a Home Assistant long-lived access token.
-- `MQTT Host`: broker IP address only, for example `192.168.1.10`.
-- `MQTT Port`: usually `1883`.
-- `MQTT Username`: your broker username.
-- `MQTT Password`: your broker password.
-- `MQTT Discovery Prefix`: usually `homeassistant`.
-- `Device Name`: default is `Nintendo Switch`.
-- `Client ID`: auto-generated, but can be edited if needed.
-
-The MQTT host should be a numeric IP address. Plain TCP MQTT 3.1.1 is supported. TLS on `8883`, mDNS hostnames such as `homeassistant.local`, and MQTT over WebSocket are not supported by the sysmodule.
-
-Press `Y` in the NRO to run a one-time Home Assistant and MQTT connection test. The NRO only tests the connection; the background sensor publishing is done by the sysmodule after reboot.
-
-When you change any configuration value, reboot the console so the sysmodule reloads the updated config. You can press `-` in the NRO to reboot.
-
-## Home Assistant MQTT
-
-State topics are published under:
-
-```text
-switch_ha/<client_id>/...
-```
-
-Home Assistant discovery topics use the configured discovery prefix, normally:
+With MQTT Discovery enabled, Switch Assistant publishes discovery payloads under the configured prefix, usually:
 
 ```text
 homeassistant
 ```
 
-Recommended MQTT settings are similar to HASS.Agent:
+Console states are published under:
 
-- Broker host: IP address of your MQTT broker.
-- Port: `1883`.
-- Username/password: your MQTT broker credentials.
-- Discovery prefix: `homeassistant`.
-- Client ID: unique for this Switch.
+```text
+switch_ha/<client_id>/...
+```
 
-If the log says `TCP failed ... broker/port closed errno=111`, the Switch reached the broker IP but the TCP port was refused before MQTT authentication. In that case, the issue is not the username or password. Check that your broker is listening on LAN port `1883`, that the Home Assistant Mosquitto add-on exposes the port outside the container, and that firewall/VLAN/client isolation rules allow the Switch to reach the broker.
+Main entities:
 
-### Notifications
+| Type | Entities |
+| --- | --- |
+| Battery sensors | level, charging state, charger type, voltage, temperature, battery health |
+| Console sensors | brightness, screen, volume, audio output target |
+| Game | game running, current Title ID |
+| Controllers | player count, Player 1-8 controller type |
+| Commands | reboot, shutdown |
+| Notifications | Home Assistant popup on the Switch |
 
-Switch Assistant exposes one MQTT notify entity through Home Assistant discovery:
+## Send A Notification To The Switch
 
-- `Popup Notification`
+<p align="center">
+  <img src="img/notification_example.jpg" alt="Home Assistant notification example on Nintendo Switch" width="900">
+</p>
 
-Use the Home Assistant `notify.send_message` action:
+Home Assistant creates a notify entity with a name similar to:
+
+```text
+notify.nintendo_switch_popup_notification
+```
+
+Example Home Assistant action:
 
 ```yaml
 action: notify.send_message
@@ -142,30 +159,81 @@ data:
   message: "Laundry finished"
 ```
 
-The MQTT sysmodule writes each notification to:
+You can also send a title and message:
+
+```yaml
+action: notify.send_message
+target:
+  entity_id: notify.nintendo_switch_popup_notification
+data:
+  title: "Home Assistant"
+  message: "The washing machine has finished"
+```
+
+The sysmodule writes the latest notification here:
 
 ```text
 sdmc:/switch/switch-ha/notification-current.ini
+```
+
+and keeps a small log here:
+
+```text
 sdmc:/switch/switch-ha/notifications.log
 ```
 
-The overlay loader starts `switch-ha-overlay.ovl` automatically after reboot. The overlay watches `notification-current.ini` and draws the popup without opening Tesla Menu.
+The overlay reads these files and shows the popup automatically.
 
-## UI Controls
+## Troubleshooting
 
-- `D-Pad`: select field.
-- `A`: edit selected field and save automatically.
-- `Y`: test Home Assistant and MQTT connection.
-- `-`: reboot the console to apply sysmodule/config changes.
-- `+`: exit.
+### Home Assistant does not show any entities
 
-## Build
+- Make sure the MQTT integration is enabled in Home Assistant.
+- Check that `Discovery` is set to `homeassistant`.
+- Press `Y` in the app and confirm that the MQTT test succeeds.
+- Reboot the console after saving the configuration.
 
-Requirements:
+### Wrong MQTT port
+
+If you see a message like:
+
+```text
+Port 8123 is HA HTTP; MQTT is usually 1883
+```
+
+you are using the Home Assistant web port. MQTT usually runs on `1883`.
+
+### TCP failed or broker/port closed
+
+The Switch reached the broker IP, but the MQTT port is closed or not exposed.
+
+Check that:
+
+- Mosquitto or your MQTT broker is running.
+- Port `1883` is exposed on your LAN.
+- Firewall, VLAN, or client isolation rules are not blocking the Switch.
+- The configured IP address is the MQTT broker address.
+
+### The test works, but sensors do not appear
+
+The test runs from the `.nro` app. Sensors are published by the sysmodule only after rebooting.
+
+Press `-` in the app or reboot the console manually.
+
+### Notifications do not appear
+
+- Make sure the notify entity exists in Home Assistant.
+- Send a test notification from Home Assistant.
+- Check that `notification-current.ini` is updated.
+- Reboot the console to make sure the overlay loader and overlay are running.
+
+## Build From Source
+
+Requirement:
 
 - Docker Desktop installed and running.
 
-Build from Windows:
+From Windows:
 
 ```bat
 scripts\build-docker.bat
@@ -173,12 +241,26 @@ scripts\build-docker.bat
 
 The script:
 
-- checks that Docker is available;
 - pulls `devkitpro/devkita64` if needed;
 - builds the sysmodule;
 - builds the notification overlay;
 - builds the notification overlay loader;
-- embeds the sysmodule into the NRO;
-- builds the final `switch-ha.nro`.
+- embeds the sysmodule and overlay into the app romfs;
+- generates `switch-ha.nro`.
 
-The overlay loader is derived from the ISC-licensed `nx-ovlloader` project and chainloads Switch Assistant's overlay directly instead of Tesla Menu.
+## Useful Paths
+
+| Path | Contents |
+| --- | --- |
+| `sdmc:/switch/switch-ha/switch-ha.nro` | Homebrew app. |
+| `sdmc:/switch/switch-ha/config.ini` | Configuration. |
+| `sdmc:/switch/switch-ha/switch-ha-overlay.ovl` | Notification overlay. |
+| `sdmc:/switch/switch-ha/sysmodule.log` | Sysmodule log. |
+| `sdmc:/switch/switch-ha/sysmodule-heartbeat.txt` | Sysmodule diagnostic state. |
+| `sdmc:/switch/switch-ha/notifications.log` | Short notification history. |
+| `sdmc:/atmosphere/contents/0100000000000F12` | Switch Assistant sysmodule. |
+| `sdmc:/atmosphere/contents/0100000000000F13` | Switch Assistant overlay loader. |
+
+## Credits
+
+The overlay loader is derived from the ISC-licensed `nx-ovlloader` project and chainloads the Switch Assistant overlay directly instead of Tesla Menu.
