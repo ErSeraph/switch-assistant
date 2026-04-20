@@ -1,4 +1,5 @@
 #include "mqtt_client.h"
+#include "title_cache.h"
 
 #include <errno.h>
 #include <poll.h>
@@ -38,6 +39,7 @@ typedef struct {
     char audio_target[24];
     char game_running[8];
     char current_game_id[24];
+    char current_game_name[0x200];
     char player_controller_count[16];
     char player_controller[MAX_PLAYERS][32];
 } SensorSnapshot;
@@ -691,7 +693,7 @@ static bool scan_process_list_for_application(AppState *state, u64 *pid_out, u64
     return true;
 }
 
-static bool current_game(AppState *state, u64 *application_id) {
+static bool current_game(AppState *state, u64 *application_id, char *name, size_t name_size) {
     if (!state->svc_pminfo_ready) {
         set_game_status(state, "pminfo unavailable");
         return false;
@@ -702,6 +704,9 @@ static bool current_game(AppState *state, u64 *application_id) {
 
     if (scan_process_list_for_application(state, &pid, &program_id)) {
         *application_id = program_id;
+        if (!title_cache_lookup(program_id, name, name_size)) {
+            copy_text(name, name_size, "Sconosciuto");
+        }
         set_game_status(state, "running scan=0x%016llx pid=%llu", (unsigned long long) program_id, (unsigned long long) pid);
         return true;
     }
@@ -833,33 +838,7 @@ static void clear_discovery_topic(int fd, const AppConfig *config, const char *c
     mqtt_send_publish(fd, topic, "", true);
 }
 
-static void clear_removed_discovery(AppState *state, int fd, const AppConfig *config) {
-    (void) state;
-    clear_discovery_topic(fd, config, "sensor", "connection_type");
-    clear_discovery_topic(fd, config, "sensor", "controller_summary");
-    clear_discovery_topic(fd, config, "sensor", "controller_unit_count");
-    clear_discovery_topic(fd, config, "sensor", "current_app_id");
-    clear_discovery_topic(fd, config, "sensor", "current_app_name");
-    clear_discovery_topic(fd, config, "sensor", "fan_speed");
-    clear_discovery_topic(fd, config, "sensor", "ip_address");
-    clear_discovery_topic(fd, config, "sensor", "network_connected");
-    clear_discovery_topic(fd, config, "sensor", "operation_mode");
-    clear_discovery_topic(fd, config, "sensor", "pcb_temperature");
-    clear_discovery_topic(fd, config, "sensor", "performance_mode");
-    clear_discovery_topic(fd, config, "sensor", "soc_temperature");
-    clear_discovery_topic(fd, config, "sensor", "wifi_rssi");
-    clear_discovery_topic(fd, config, "sensor", "wifi_strength");
-    clear_discovery_topic(fd, config, "binary_sensor", "audio_muted");
-    clear_discovery_topic(fd, config, "binary_sensor", "docked");
-    clear_discovery_topic(fd, config, "binary_sensor", "game_running");
-    clear_discovery_topic(fd, config, "binary_sensor", "joycon_rail_attached");
-    clear_discovery_topic(fd, config, "binary_sensor", "network_connected");
-    clear_discovery_topic(fd, config, "binary_sensor", "tv_mode");
-    clear_discovery_topic(fd, config, "sensor", "cradle_status");
-}
-
 static void publish_sensor_discovery(AppState *state, int fd, const AppConfig *config) {
-    clear_removed_discovery(state, fd, config);
 
     publish_discovery_sensor(fd, config, "sensor", "battery", "Battery Level", "battery", "%", "measurement");
     publish_discovery_sensor(fd, config, "binary_sensor", "charging", "Is Charging", "battery_charging", NULL, NULL);
@@ -877,6 +856,7 @@ static void publish_sensor_discovery(AppState *state, int fd, const AppConfig *c
         publish_discovery_sensor(fd, config, "sensor", "audio_target", "Audio Output Target", NULL, NULL, NULL);
     }
     publish_discovery_sensor(fd, config, "binary_sensor", "game_running", "Game Running", "running", NULL, NULL);
+    publish_discovery_sensor(fd, config, "sensor", "current_game", "Current Game", NULL, NULL, NULL);
     publish_discovery_sensor(fd, config, "sensor", "current_game_id", "Current Game Title ID", NULL, NULL, NULL);
     clear_discovery_topic(fd, config, "sensor", "current_game_name");
     clear_discovery_topic(fd, config, "sensor", "game_pid");
@@ -998,8 +978,10 @@ static void publish_switch_sensors(AppState *state, int fd, const AppConfig *con
     }
 
     u64 application_id = 0;
-    if (current_game(state, &application_id)) {
+    char game_name[0x200];
+    if (current_game(state, &application_id, game_name, sizeof(game_name))) {
         publish_if_changed(fd, config, snapshot, force, "game_running", snapshot->game_running, sizeof(snapshot->game_running), "ON");
+        publish_if_changed(fd, config, snapshot, force, "current_game", snapshot->current_game_name, sizeof(snapshot->current_game_name), game_name);
         if (application_id != 0) {
             snprintf(value, sizeof(value), "%016llx", (unsigned long long) application_id);
         } else {
@@ -1008,6 +990,7 @@ static void publish_switch_sensors(AppState *state, int fd, const AppConfig *con
         publish_if_changed(fd, config, snapshot, force, "current_game_id", snapshot->current_game_id, sizeof(snapshot->current_game_id), value);
     } else {
         publish_if_changed(fd, config, snapshot, force, "game_running", snapshot->game_running, sizeof(snapshot->game_running), "OFF");
+        publish_if_changed(fd, config, snapshot, force, "current_game", snapshot->current_game_name, sizeof(snapshot->current_game_name), "none");
         publish_if_changed(fd, config, snapshot, force, "current_game_id", snapshot->current_game_id, sizeof(snapshot->current_game_id), "none");
     }
 

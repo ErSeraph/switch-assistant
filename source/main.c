@@ -2,6 +2,7 @@
 #include "config.h"
 #include "http_client.h"
 #include "mqtt_client.h"
+#include "title_cache.h"
 #include "ui.h"
 
 #include <curl/curl.h>
@@ -31,6 +32,8 @@ extern const unsigned char switch_ha_overlay_loader_exefs_start[];
 extern const unsigned char switch_ha_overlay_loader_exefs_end[];
 extern const unsigned char switch_ha_overlay_ovl_start[];
 extern const unsigned char switch_ha_overlay_ovl_end[];
+extern const unsigned char switch_ha_titles_txt_start[];
+extern const unsigned char switch_ha_titles_txt_end[];
 
 static bool ensure_dir(const char *path) {
     if (mkdir(path, 0777) == 0 || errno == EEXIST) {
@@ -175,6 +178,12 @@ static bool install_sysmodule(AppState *state) {
     size_t overlay_size = (size_t) (switch_ha_overlay_ovl_end - switch_ha_overlay_ovl_start);
     if (overlay_size == 0 || !write_file(OVERLAY_SDMC_PATH, switch_ha_overlay_ovl_start, overlay_size)) {
         app_state_push_log(state, "Overlay install failed");
+        return false;
+    }
+
+    size_t titles_size = (size_t) (switch_ha_titles_txt_end - switch_ha_titles_txt_start);
+    if (titles_size == 0 || !write_file(TITLE_CACHE_PATH, switch_ha_titles_txt_start, titles_size)) {
+        app_state_push_log(state, "Title database install failed");
         return false;
     }
 

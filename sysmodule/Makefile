@@ -34,7 +34,7 @@ export APP_JSON := $(CURDIR)/$(CONFIG_JSON)
 export DEPSDIR := $(CURDIR)/$(BUILD)
 
 export VPATH := $(CURDIR)/source $(CURDIR)/../source
-export OFILES := main.o app_state.o config.o mqtt_client.o
+export OFILES := main.o app_state.o config.o mqtt_client.o title_cache.o
 
 export INCLUDE := -I$(CURDIR)/../include \
 	$(foreach dir,$(LIBDIRS),-I$(dir)/include) \

@@ -24,3 +24,12 @@ switch_ha_overlay_ovl_start:
 .incbin "../romfs/overlay/switch-ha-overlay.ovl"
 switch_ha_overlay_ovl_end:
 .balign 16
+
+.section .rodata.titles_txt, "a", %progbits
+.balign 16
+.global switch_ha_titles_txt_start
+.global switch_ha_titles_txt_end
+switch_ha_titles_txt_start:
+.incbin "../romfs/titles/titles.txt"
+switch_ha_titles_txt_end:
+.balign 16

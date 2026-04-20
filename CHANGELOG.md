@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## v1.3
 
 - Fix saved video recordings showing a green screen by excluding the notification overlay from the recording layer stack.
+- Resolve the current game name from a bundled title database.
+- Install the bundled title database alongside the Switch Assistant config files.
 
 ## v1.2
 
