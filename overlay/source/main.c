@@ -377,7 +377,6 @@ static Result init_graphics(void) {
         }
         append_log("viAddToLayerStack Default", vi_add_to_layer_stack(&g_layer, ViLayerStack_Default));
         append_log("viAddToLayerStack Screenshot", vi_add_to_layer_stack(&g_layer, ViLayerStack_Screenshot));
-        append_log("viAddToLayerStack Recording", vi_add_to_layer_stack(&g_layer, ViLayerStack_Recording));
         append_log("viAddToLayerStack Arbitrary", vi_add_to_layer_stack(&g_layer, ViLayerStack_Arbitrary));
         append_log("viAddToLayerStack LastFrame", vi_add_to_layer_stack(&g_layer, ViLayerStack_LastFrame));
         append_log("viAddToLayerStack Null", vi_add_to_layer_stack(&g_layer, ViLayerStack_Null));
