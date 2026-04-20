@@ -705,7 +705,7 @@ static bool current_game(AppState *state, u64 *application_id, char *name, size_
     if (scan_process_list_for_application(state, &pid, &program_id)) {
         *application_id = program_id;
         if (!title_cache_lookup(program_id, name, name_size)) {
-            copy_text(name, name_size, "Sconosciuto");
+            copy_text(name, name_size, "Unknown");
         }
         set_game_status(state, "running scan=0x%016llx pid=%llu", (unsigned long long) program_id, (unsigned long long) pid);
         return true;
