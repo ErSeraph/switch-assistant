@@ -45,6 +45,16 @@ The `.nro` app is only used for setup and configuration. After rebooting, the sy
 
 > Important: the sysmodule supports plain TCP MQTT, usually on port `1883`. It does not support TLS on `8883`, MQTT over WebSocket, or mDNS hostnames such as `homeassistant.local` for the MQTT broker.
 
+## Before You Start
+
+If you want to add a more polished and visual experience to your Home Assistant dashboard, check out this custom card built on top of Switch Assistant by *hudsonbrendon*:
+
+👉 https://github.com/hudsonbrendon/nintendo-switch-card
+
+It provides a clean visual representation of your Nintendo Switch state, including controllers, battery, current game, and more — along with handy controls and notifications.
+
+<p align="center"> <img src="https://github.com/user-attachments/assets/d30aed7e-9722-4464-852c-28144422cfd8" alt="Nintendo Switch Card preview" width="500"> </p>
+
 ## Quick Installation
 
 1. Download `switch-ha.nro` from the latest [release](https://github.com/ErSeraph/switch-assistant/releases).
