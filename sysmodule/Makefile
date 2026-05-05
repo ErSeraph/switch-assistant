@@ -11,12 +11,14 @@ $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>dev
 endif
 
 TOPDIR ?= $(CURDIR)
+include $(TOPDIR)/../version.mk
 include $(DEVKITPRO)/libnx/switch_rules
 
 ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
 CFLAGS := -g -Wall -O2 -ffunction-sections $(ARCH)
 CFLAGS += -D__SWITCH__ -DCURL_STATICLIB
+CFLAGS += -DSHA_APP_BUILD=\"$(APP_VERSION)\"
 CXXFLAGS := $(CFLAGS) -fno-rtti -fno-exceptions
 ASFLAGS := -g $(ARCH)
 LDFLAGS := -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
@@ -71,6 +73,8 @@ all: $(OUTPUT).nsp
 $(OUTPUT).nsp: $(OUTPUT).nso $(OUTPUT).npdm
 
 $(OUTPUT).elf: $(OFILES)
+
+$(OFILES): $(TOPDIR)/../version.mk
 
 -include $(DEPENDS)
 

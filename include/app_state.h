@@ -7,7 +7,10 @@
 #define SHA_MAX_TOPIC 128
 #define SHA_MAX_LOG 12
 #define SHA_LOG_LINE 96
-#define SHA_APP_BUILD "1.0"
+
+#ifndef SHA_APP_BUILD
+#define SHA_APP_BUILD "dev"
+#endif
 
 typedef enum {
     AppMode_ForegroundApp = 0,

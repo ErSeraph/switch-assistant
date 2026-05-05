@@ -8,16 +8,17 @@ $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>dev
 endif
 
 TOPDIR ?= $(CURDIR)
+include $(TOPDIR)/version.mk
 
 APP_TITLE ?= Switch Assistant
 APP_AUTHOR ?= ErSeraph
-APP_VERSION ?= 1.0
 APP_ICON ?= $(TOPDIR)/assets/icon.jpg
 
 ARCH := -march=armv8-a -mtune=cortex-a57 -mtp=soft -fPIE
 
 CFLAGS := -g -Wall -O2 -ffunction-sections $(ARCH)
 CFLAGS += -D__SWITCH__ -DCURL_STATICLIB
+CFLAGS += -DSHA_APP_BUILD=\"$(APP_VERSION)\"
 CXXFLAGS := $(CFLAGS) -fno-rtti -fno-exceptions
 ASFLAGS := -g $(ARCH)
 LDFLAGS := -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
@@ -96,6 +97,8 @@ $(OUTPUT).nro: $(APP_ICON)
 endif
 
 $(OUTPUT).elf: $(OFILES)
+
+$(OFILES): $(TOPDIR)/version.mk
 
 -include $(DEPENDS)
 

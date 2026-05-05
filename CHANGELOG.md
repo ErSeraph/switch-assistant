@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4
+
+- Add live screen streaming to Home Assistant via RTSP.
+- Publish a new MQTT entity with the console's RTSP stream URL for easy camera setup.
+
 ## v1.3
 
 - Fix saved video recordings showing a green screen by excluding the notification overlay from the recording layer stack.
