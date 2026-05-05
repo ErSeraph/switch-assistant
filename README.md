@@ -22,6 +22,7 @@ Once configured, it publishes console sensors to Home Assistant and shows Home A
 - Sends Home Assistant popup notifications to the Switch.
 - Provides a simple Homebrew configuration app on the console.
 - Uses MQTT Discovery so entities appear automatically in Home Assistant.
+- Live screen streaming to Home Assistant via RTSP.
 
 ## How It Works
 
@@ -147,6 +148,15 @@ Main entities:
 | Controllers | player count, Player 1-8 controller type |
 | Commands | reboot, shutdown |
 | Notifications | Home Assistant popup on the Switch |
+
+## Live Streaming
+
+The console supports live streaming while you are in-game.
+
+To enable it, simply create a **Generic Camera** using the stream URL, which can be found in the entity **Screen Stream URL**. Make sure to disable SSL verification in the camera configuration for it to work correctly.
+<p align="center">
+  <img src="img/live_example.gif" alt="Home Assistant notification example on Nintendo Switch" width="900">
+</p>
 
 ## Send A Notification To The Switch
 
