@@ -1,6 +1,7 @@
 #include "app_state.h"
 #include "config.h"
 #include "mqtt_client.h"
+#include "screen_stream.h"
 
 #include <switch.h>
 #include <stdio.h>
@@ -21,6 +22,8 @@ static Result g_hid_init_result = RESULT_NOT_INITIALIZED;
 static Result g_lbl_init_result = RESULT_NOT_INITIALIZED;
 static Result g_audctl_init_result = RESULT_NOT_INITIALIZED;
 static Result g_pminfo_init_result = RESULT_NOT_INITIALIZED;
+static Thread g_power_guard_thread = {0};
+static bool g_power_guard_thread_active = false;
 
 u32 __nx_applet_type = AppletType_None;
 u32 __nx_fs_num_sessions = 1;
@@ -50,10 +53,15 @@ void __appInit(void) {
 }
 
 void __appExit(void) {
+    if (g_power_guard_thread_active) {
+        threadClose(&g_power_guard_thread);
+        g_power_guard_thread_active = false;
+    }
     if (R_SUCCEEDED(g_pminfo_init_result)) pminfoExit();
     if (R_SUCCEEDED(g_audctl_init_result)) audctlExit();
     if (R_SUCCEEDED(g_lbl_init_result)) lblExit();
     if (R_SUCCEEDED(g_hid_init_result)) hidExit();
+    screen_stream_stop();
     if (R_SUCCEEDED(g_spsm_init_result)) spsmExit();
     if (R_SUCCEEDED(g_psm_init_result)) psmExit();
     if (R_SUCCEEDED(g_socket_init_result)) socketExit();
@@ -112,6 +120,52 @@ static void init_core_services(AppState *state) {
 
     smExit();
     append_log("core service init done");
+}
+
+static void power_guard_thread_main(void *arg) {
+    AppState *state = arg;
+    bool last_sleeping = false;
+
+    while (true) {
+        if (!state->svc_lbl_ready) {
+            svcSleepThread(1000ULL * 1000ULL * 1000ULL);
+            continue;
+        }
+
+        LblBacklightSwitchStatus backlight = LblBacklightSwitchStatus_Enabled;
+        Result rc = lblGetBacklightSwitchStatus(&backlight);
+        if (R_FAILED(rc)) {
+            svcSleepThread(250ULL * 1000ULL * 1000ULL);
+            continue;
+        }
+
+        bool sleeping = backlight == LblBacklightSwitchStatus_Disabled ||
+                        backlight == LblBacklightSwitchStatus_Disabling;
+        if (sleeping != last_sleeping) {
+            mutexLock(&state->lock);
+            state->power_sleeping = sleeping;
+            mutexUnlock(&state->lock);
+            screen_stream_set_paused(sleeping);
+            last_sleeping = sleeping;
+        }
+
+        svcSleepThread(sleeping ? 1000ULL * 1000ULL * 1000ULL : 200ULL * 1000ULL * 1000ULL);
+    }
+}
+
+static void init_power_guard(AppState *state) {
+    Result rc = threadCreate(&g_power_guard_thread, power_guard_thread_main, state, NULL, 0x4000, 0x2B, -2);
+    if (R_FAILED(rc)) {
+        append_log_result("power_guard_create", rc);
+        return;
+    }
+    g_power_guard_thread_active = true;
+    rc = threadStart(&g_power_guard_thread);
+    if (R_FAILED(rc)) {
+        append_log_result("power_guard_start", rc);
+        threadClose(&g_power_guard_thread);
+        g_power_guard_thread_active = false;
+    }
 }
 
 static void apply_startup_delay(const AppConfig *config) {
@@ -247,12 +301,21 @@ static void write_heartbeat(AppState *state) {
     fprintf(file, "mqtt_dns_ok=%d\n", state->mqtt_dns_ok ? 1 : 0);
     fprintf(file, "mqtt_tcp_ok=%d\n", state->mqtt_tcp_ok ? 1 : 0);
     fprintf(file, "mqtt_detail=%s\n", state->mqtt_last_error);
+    fprintf(file, "power_sleeping=%d\n", state->power_sleeping ? 1 : 0);
     fprintf(file, "game_status=%s\n", state->game_status);
     fprintf(file, "client_id=%s\n", state->config.mqtt_client_id);
     fprintf(file, "socket_init=0x%x\n", g_socket_init_result);
     fprintf(file, "socket_last=0x%x\n", socketGetLastResult());
     fprintf(file, "psm_init=0x%x\n", g_psm_init_result);
     fprintf(file, "spsm_init=0x%x\n", g_spsm_init_result);
+    fprintf(file, "grcd_open=0x%x\n", screen_stream_get_grcd_open_result());
+    fprintf(file, "grcd_begin=0x%x\n", screen_stream_get_grcd_begin_result());
+    {
+        char stream_status[32];
+        screen_stream_get_status(stream_status, sizeof(stream_status));
+        fprintf(file, "screen_stream=%s\n", stream_status);
+        fprintf(file, "screen_rtsp_port=%u\n", screen_stream_port());
+    }
     fprintf(file, "hid_init=0x%x\n", g_hid_init_result);
     fprintf(file, "lbl_init=0x%x\n", g_lbl_init_result);
     fprintf(file, "audctl_init=0x%x\n", g_audctl_init_result);
@@ -281,6 +344,8 @@ int main(int argc, char **argv) {
     apply_startup_delay(&state.config);
     init_core_services(&state);
     init_optional_services(&state);
+    screen_stream_start(&state);
+    init_power_guard(&state);
 
     mqtt_service_start(&state);
     append_log("mqtt thread started");
@@ -294,8 +359,16 @@ int main(int argc, char **argv) {
             mutexUnlock(&state.lock);
         }
 
-        write_heartbeat(&state);
-        svcSleepThread(30ULL * 1000ULL * 1000ULL * 1000ULL);
+        mutexLock(&state.lock);
+        bool power_sleeping = state.power_sleeping;
+        mutexUnlock(&state.lock);
+
+        if (!power_sleeping) {
+            write_heartbeat(&state);
+            svcSleepThread(30ULL * 1000ULL * 1000ULL * 1000ULL);
+        } else {
+            svcSleepThread(1000ULL * 1000ULL * 1000ULL);
+        }
     }
 
     return 0;

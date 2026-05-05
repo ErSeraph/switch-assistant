@@ -1,4 +1,5 @@
 #include "mqtt_client.h"
+#include "screen_stream.h"
 #include "title_cache.h"
 
 #include <errno.h>
@@ -24,7 +25,7 @@
 #define NOTIFICATION_CURRENT_PATH "sdmc:/switch/switch-ha/notification-current.ini"
 #define NOTIFICATION_LOG_PATH "sdmc:/switch/switch-ha/notifications.log"
 #define NOTIFICATION_LOG_MAX_BYTES 8192
-
+#define SCREEN_RTSP_URL_SENSOR "screen_rtsp_url"
 typedef struct {
     bool initialized;
     char battery[16];
@@ -40,6 +41,7 @@ typedef struct {
     char game_running[8];
     char current_game_id[24];
     char current_game_name[0x200];
+    char screen_rtsp_url[128];
     char player_controller_count[16];
     char player_controller[MAX_PLAYERS][32];
 } SensorSnapshot;
@@ -322,22 +324,27 @@ static bool mqtt_send_connect(const AppConfig *config, int fd) {
     return mqtt_send_packet(fd, packet, 1 + remain + payload_len);
 }
 
-static bool mqtt_send_publish(int fd, const char *topic, const char *payload, bool retain) {
-    unsigned char packet[MQTT_BUFFER];
-    unsigned char *ptr = packet;
-    *ptr++ = retain ? 0x31 : 0x30;
-
+static bool mqtt_send_publish_bytes(int fd, const char *topic, const void *payload, size_t payload_len, bool retain) {
     size_t topic_len = strlen(topic);
-    size_t payload_len = strlen(payload);
     size_t remain_len = 2 + topic_len + payload_len;
-    if (1 + 4 + remain_len > sizeof(packet)) {
+    size_t packet_size = 1 + 4 + remain_len;
+    unsigned char *packet = malloc(packet_size);
+    if (!packet) {
         return false;
     }
+    unsigned char *ptr = packet;
+    *ptr++ = retain ? 0x31 : 0x30;
     ptr += encode_remaining_length(ptr, (int) remain_len);
     ptr = write_string(ptr, topic);
     memcpy(ptr, payload, payload_len);
     ptr += payload_len;
-    return mqtt_send_packet(fd, packet, (size_t) (ptr - packet));
+    bool ok = mqtt_send_packet(fd, packet, (size_t) (ptr - packet));
+    free(packet);
+    return ok;
+}
+
+static bool mqtt_send_publish(int fd, const char *topic, const char *payload, bool retain) {
+    return mqtt_send_publish_bytes(fd, topic, payload, strlen(payload), retain);
 }
 
 static bool mqtt_send_subscribe(int fd, const char *topic) {
@@ -358,6 +365,28 @@ static bool mqtt_send_subscribe(int fd, const char *topic) {
 static bool mqtt_send_ping(int fd) {
     const unsigned char ping[2] = {0xC0, 0x00};
     return mqtt_send_packet(fd, ping, sizeof(ping));
+}
+
+static bool local_ipv4_for_socket(int fd, char *out, size_t out_size) {
+    struct sockaddr_in addr = {0};
+    socklen_t len = sizeof(addr);
+
+    if (fd < 0 || getsockname(fd, (struct sockaddr *) &addr, &len) != 0 || addr.sin_family != AF_INET) {
+        return false;
+    }
+
+    return inet_ntop(AF_INET, &addr.sin_addr, out, out_size) != NULL;
+}
+
+static void build_screen_rtsp_url(int fd, char *out, size_t out_size) {
+    char ip[64];
+
+    if (!local_ipv4_for_socket(fd, ip, sizeof(ip))) {
+        snprintf(out, out_size, "unknown");
+        return;
+    }
+
+    snprintf(out, out_size, "rtsp://%s:%u/", ip, screen_stream_port());
 }
 
 static const char *charger_type_name(PsmChargerType type) {
@@ -874,6 +903,12 @@ static void publish_sensor_discovery(AppState *state, int fd, const AppConfig *c
         publish_discovery_button(fd, config, "reboot", "Reboot", "reboot");
         publish_discovery_button(fd, config, "shutdown", "Shutdown", "shutdown");
     }
+    if (state->app_mode == AppMode_Sysmodule) {
+        publish_discovery_sensor(fd, config, "sensor", SCREEN_RTSP_URL_SENSOR, "Screen Stream URL", NULL, NULL, NULL);
+        clear_discovery_topic(fd, config, "sensor", "screen_stream_status");
+        clear_discovery_topic(fd, config, "sensor", "screen_rtsp_port");
+        clear_discovery_topic(fd, config, "camera", "screen_camera");
+    }
     publish_discovery_notify(fd, config, "popup", "Popup Notification");
     clear_discovery_topic(fd, config, "notify", "modal");
 }
@@ -1035,6 +1070,12 @@ static void publish_switch_sensors(AppState *state, int fd, const AppConfig *con
         }
     }
 
+    if (state->app_mode == AppMode_Sysmodule) {
+        char stream_url[128];
+        build_screen_rtsp_url(fd, stream_url, sizeof(stream_url));
+        publish_if_changed(fd, config, snapshot, force, SCREEN_RTSP_URL_SENSOR,
+                           snapshot->screen_rtsp_url, sizeof(snapshot->screen_rtsp_url), stream_url);
+    }
     snapshot->initialized = true;
 }
 
@@ -1206,6 +1247,8 @@ static void mqtt_loop(void *arg) {
     while (true) {
         mutexLock(&state->lock);
         bool should_exit = state->exit_requested;
+        bool power_sleeping = state->power_sleeping;
+        bool dns_ok = state->mqtt_dns_ok;
         AppConfig config = state->config;
         char prefix[SHA_MAX_TOPIC];
         strncpy(prefix, state->config.mqtt_topic_prefix, sizeof(prefix) - 1);
@@ -1218,6 +1261,12 @@ static void mqtt_loop(void *arg) {
 
         if (should_exit) {
             break;
+        }
+
+        if (power_sleeping) {
+            mqtt_set_status(state, dns_ok, false, false, "sleeping");
+            svcSleepThread(1000 * 1000 * 1000ULL);
+            continue;
         }
 
         if (host[0] == '\0' || prefix[0] == '\0') {
@@ -1317,8 +1366,12 @@ static void mqtt_loop(void *arg) {
 
             mutexLock(&state->lock);
             should_exit = state->exit_requested;
+            power_sleeping = state->power_sleeping;
             mutexUnlock(&state->lock);
             if (should_exit) {
+                break;
+            }
+            if (power_sleeping) {
                 break;
             }
 
@@ -1337,15 +1390,19 @@ static void mqtt_loop(void *arg) {
             }
         }
 
-        publish_state(state, fd, &config, "offline");
+        if (!power_sleeping) {
+            publish_state(state, fd, &config, "offline");
+        }
         close(fd);
         g_ctx.socket_fd = -1;
         mutexLock(&state->lock);
         state->mqtt_tcp_ok = false;
         state->mqtt_connected = false;
-        snprintf(state->mqtt_last_error, sizeof(state->mqtt_last_error), "disconnected");
+        snprintf(state->mqtt_last_error, sizeof(state->mqtt_last_error), "%s", power_sleeping ? "sleeping" : "disconnected");
         mutexUnlock(&state->lock);
-        app_state_push_log(state, "MQTT disconnected");
+        if (!power_sleeping) {
+            app_state_push_log(state, "MQTT disconnected");
+        }
     }
 }
 
