@@ -3,11 +3,15 @@
 <p align="center">
   <img src="img/logo.png" alt="Switch Assistant logo" width="220">
 </p>
-
 <p align="center">
-  <a href="https://github.com/ErSeraph/switch-assistant/releases"><img alt="Download" src="https://img.shields.io/badge/download-release-2ea44f?style=for-the-badge"></a>
-  <img alt="Nintendo Switch" src="https://img.shields.io/badge/Nintendo%20Switch-homebrew-e60012?style=for-the-badge">
   <img alt="Home Assistant" src="https://img.shields.io/badge/Home%20Assistant-MQTT-41bdf5?style=for-the-badge">
+  <img alt="Nintendo Switch" src="https://img.shields.io/badge/Nintendo%20Switch-homebrew-e60012?style=for-the-badge">
+</p>
+<p align="center">
+  <a href="https://github.com/ErSeraph/switch-assistant/releases/latest"><img src="https://img.shields.io/github/v/release/ErSeraph/switch-assistant?style=flat-square" /></a>
+  <a href="https://github.com/ErSeraph/switch-assistant/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ErSeraph/switch-assistant?style=flat-square" /></a>
+  <a href="https://github.com/ErSeraph/switch-assistant/releases"><img src="https://img.shields.io/github/downloads/erseraph/switch-assistant/total?style=flat-square&color=1f883d"></a>
+  <a href="https://ko-fi.com/erseraph"><img src="https://img.shields.io/badge/Ko--fi-support-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white" /></a>
 </p>
 
 Switch Assistant connects your Nintendo Switch to Home Assistant through MQTT.
