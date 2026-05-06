@@ -147,25 +147,20 @@ static void remove_legacy_install_if_owned(AppState *state, const char *base_pat
     }
 }
 
-static bool install_sysmodule(AppState *state) {
-    remove_legacy_install_if_owned(state, LEGACY_SYSMODULE_SDMC_BASE, "switch-ha-sysmodule", "sysmodule");
-    remove_legacy_install_if_owned(state, LEGACY_OVERLAY_LOADER_SDMC_BASE, "switch-ha-overlay-loader", "overlay loader");
-
-    if (!ensure_dir("sdmc:/switch") ||
-        !ensure_dir("sdmc:/switch/switch-ha") ||
-        !ensure_dir("sdmc:/atmosphere") ||
-        !ensure_dir("sdmc:/atmosphere/contents") ||
-        !ensure_dir(SYSMODULE_SDMC_BASE) ||
-        !ensure_dir(SYSMODULE_SDMC_BASE "/flags") ||
-        !ensure_dir(OVERLAY_LOADER_SDMC_BASE) ||
-        !ensure_dir(OVERLAY_LOADER_SDMC_BASE "/flags")) {
-        app_state_push_log(state, "Sysmodule install failed: mkdir");
-        return false;
+bool notification_overlay_apply(AppState *state) {
+    if (!state->config.notification_overlay_enabled) {
+        if (remove_tree(OVERLAY_LOADER_SDMC_BASE)) {
+            app_state_push_log(state, "Notification overlay disabled");
+        } else {
+            app_state_push_log(state, "Overlay loader cleanup failed");
+        }
+        remove(OVERLAY_SDMC_PATH);
+        return true;
     }
 
-    size_t exefs_size = (size_t) (switch_ha_sysmodule_exefs_end - switch_ha_sysmodule_exefs_start);
-    if (exefs_size == 0 || !write_file(SYSMODULE_SDMC_EXEFS, switch_ha_sysmodule_exefs_start, exefs_size)) {
-        app_state_push_log(state, "Sysmodule install failed: exefs");
+    if (!ensure_dir(OVERLAY_LOADER_SDMC_BASE) ||
+        !ensure_dir(OVERLAY_LOADER_SDMC_BASE "/flags")) {
+        app_state_push_log(state, "Overlay loader install failed: mkdir");
         return false;
     }
 
@@ -178,6 +173,37 @@ static bool install_sysmodule(AppState *state) {
     size_t overlay_size = (size_t) (switch_ha_overlay_ovl_end - switch_ha_overlay_ovl_start);
     if (overlay_size == 0 || !write_file(OVERLAY_SDMC_PATH, switch_ha_overlay_ovl_start, overlay_size)) {
         app_state_push_log(state, "Overlay install failed");
+        return false;
+    }
+
+    FILE *flag = fopen(OVERLAY_LOADER_SDMC_FLAG, "wb");
+    if (!flag) {
+        app_state_push_log(state, "Overlay loader install failed: boot2");
+        return false;
+    }
+    fclose(flag);
+
+    app_state_push_log(state, "Notification overlay enabled");
+    return true;
+}
+
+static bool install_sysmodule(AppState *state) {
+    remove_legacy_install_if_owned(state, LEGACY_SYSMODULE_SDMC_BASE, "switch-ha-sysmodule", "sysmodule");
+    remove_legacy_install_if_owned(state, LEGACY_OVERLAY_LOADER_SDMC_BASE, "switch-ha-overlay-loader", "overlay loader");
+
+    if (!ensure_dir("sdmc:/switch") ||
+        !ensure_dir("sdmc:/switch/switch-ha") ||
+        !ensure_dir("sdmc:/atmosphere") ||
+        !ensure_dir("sdmc:/atmosphere/contents") ||
+        !ensure_dir(SYSMODULE_SDMC_BASE) ||
+        !ensure_dir(SYSMODULE_SDMC_BASE "/flags")) {
+        app_state_push_log(state, "Sysmodule install failed: mkdir");
+        return false;
+    }
+
+    size_t exefs_size = (size_t) (switch_ha_sysmodule_exefs_end - switch_ha_sysmodule_exefs_start);
+    if (exefs_size == 0 || !write_file(SYSMODULE_SDMC_EXEFS, switch_ha_sysmodule_exefs_start, exefs_size)) {
+        app_state_push_log(state, "Sysmodule install failed: exefs");
         return false;
     }
 
@@ -194,14 +220,11 @@ static bool install_sysmodule(AppState *state) {
     }
     fclose(flag);
 
-    flag = fopen(OVERLAY_LOADER_SDMC_FLAG, "wb");
-    if (!flag) {
-        app_state_push_log(state, "Overlay loader install failed: boot2");
+    if (!notification_overlay_apply(state)) {
         return false;
     }
-    fclose(flag);
 
-    app_state_push_log(state, "Sysmodules and overlay installed");
+    app_state_push_log(state, "Sysmodule installed");
     return true;
 }
 
@@ -214,11 +237,15 @@ int main(int argc, char **argv) {
 
     AppState state;
     app_state_init(&state);
-    install_sysmodule(&state);
 
     if (config_load(&state.config)) {
         app_state_push_log(&state, "Config loaded");
         snprintf(state.config_status, sizeof(state.config_status), "loaded");
+        if (config_last_load_needs_save() && config_save(&state.config)) {
+            app_state_push_log(&state, "Config updated");
+        } else if (config_last_load_needs_save()) {
+            app_state_push_log(&state, "Config update failed: %s", config_last_error());
+        }
     } else if (config_save(&state.config)) {
         app_state_push_log(&state, "Default config created");
         app_state_set_status(&state, "Config created");
@@ -228,6 +255,8 @@ int main(int argc, char **argv) {
         app_state_set_status(&state, "Config create failed");
         snprintf(state.config_status, sizeof(state.config_status), "create failed");
     }
+
+    install_sysmodule(&state);
 
     app_state_push_log(&state, "Initial connection test");
     app_state_set_status(&state, "Testing HA and MQTT...");

@@ -16,6 +16,8 @@
 #define C_CYAN "\x1b[36m"
 #define C_BOLD "\x1b[1m"
 
+extern bool notification_overlay_apply(AppState *state);
+
 static bool prompt_text(const char *guide, char *buffer, size_t size, bool secret) {
     SwkbdConfig kbd;
     if (R_FAILED(swkbdCreate(&kbd, 0))) {
@@ -68,6 +70,10 @@ static const char *flag(bool ok) {
     return ok ? C_GREEN "[OK]" C_RESET : C_RED "[X]" C_RESET;
 }
 
+static const char *yes_no(int enabled) {
+    return enabled ? C_GREEN "[YES]" C_RESET : C_RED "[NO]" C_RESET;
+}
+
 static const char *cursor(int selected, int row) {
     return selected == row ? C_YELLOW ">" C_RESET : " ";
 }
@@ -107,6 +113,7 @@ static void draw_ui(AppState *state, int selected) {
 
     printf(C_BOLD "System" C_RESET "\n");
     printf("%s Boot Delay: %d sec\n", cursor(selected, 9), state->config.startup_delay_seconds);
+    printf("%s Notifications: %s\n", cursor(selected, 10), yes_no(state->config.notification_overlay_enabled));
     printf("\n");
 
     printf(C_BOLD "Status" C_RESET "  " C_DIM "config %s" C_RESET "\n", state->config_status);
@@ -134,7 +141,7 @@ void ui_run(AppState *state) {
     padInitializeDefault(&pad);
 
     int selected = 0;
-    const int field_count = 10;
+    const int field_count = 11;
 
     while (appletMainLoop()) {
         padUpdate(&pad);
@@ -204,6 +211,10 @@ void ui_run(AppState *state) {
                     changed = prompt_number("Boot delay seconds (0-300)", &tmp.startup_delay_seconds);
                     tmp.startup_delay_seconds = clamp_startup_delay(tmp.startup_delay_seconds);
                     break;
+                case 10:
+                    tmp.notification_overlay_enabled = tmp.notification_overlay_enabled ? 0 : 1;
+                    changed = true;
+                    break;
             }
 
             if (changed) {
@@ -214,6 +225,9 @@ void ui_run(AppState *state) {
                 mutexUnlock(&state->lock);
                 app_state_push_log(state, "Field updated");
                 save_config_with_status(state, &tmp);
+                if (selected == 10) {
+                    notification_overlay_apply(state);
+                }
             }
         }
 

@@ -10,6 +10,10 @@
 #include <unistd.h>
 
 #define DEFAULT_NRO "sdmc:/switch/switch-ha/switch-ha-overlay.ovl"
+#define CONFIG_PATH "sdmc:/switch/switch-ha/config.ini"
+#define OVERLAY_PATH "sdmc:/switch/switch-ha/switch-ha-overlay.ovl"
+#define OVERLAY_LOADER_BOOT2_FLAG "sdmc:/atmosphere/contents/00FF000053484102/flags/boot2.flag"
+#define OVERLAY_LOADER_EXEFS "sdmc:/atmosphere/contents/00FF000053484102/exefs.nsp"
 #define LOADER_LOG "sdmc:/switch/switch-ha/overlay-loader.log"
 #define LOADER_LOG_MAX_BYTES 4096
 #ifndef NORETURN
@@ -73,6 +77,48 @@ static void appendLog(const char *message, Result rc)
     fclose(file);
 }
 
+static void trimEol(char *value)
+{
+    size_t len = strlen(value);
+    while (len > 0 && (value[len - 1] == '\n' || value[len - 1] == '\r')) {
+        value[--len] = '\0';
+    }
+}
+
+static bool notificationOverlayEnabled(void)
+{
+    FILE *file = fopen(CONFIG_PATH, "r");
+    if (!file)
+        return true;
+
+    bool enabled = true;
+    char line[256];
+    while (fgets(line, sizeof(line), file)) {
+        trimEol(line);
+        char *sep = strchr(line, '=');
+        if (!sep)
+            continue;
+        *sep = '\0';
+        if (strcmp(line, "notification_overlay_enabled") == 0) {
+            enabled = atoi(sep + 1) != 0;
+            break;
+        }
+    }
+
+    fclose(file);
+    return enabled;
+}
+
+static NORETURN void selfDisableAndExit(void)
+{
+    appendLog("notification overlay disabled by config", 0);
+    remove(OVERLAY_LOADER_BOOT2_FLAG);
+    remove(OVERLAY_PATH);
+    remove(OVERLAY_LOADER_EXEFS);
+    svcExitProcess();
+    __builtin_unreachable();
+}
+
 void __libnx_initheap(void)
 {
     static char g_innerheap[0x20000];
@@ -108,6 +154,8 @@ void __appInit(void)
         fatalThrow(MAKERESULT(Module_HomebrewLoader, 2));
     fsdevMountSdmc();
     appendLog("app init", rc);
+    if (!notificationOverlayEnabled())
+        selfDisableAndExit();
 
     smExit(); // Close SM as we don't need it anymore.
 }

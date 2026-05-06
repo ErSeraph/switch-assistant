@@ -18,6 +18,8 @@ Switch Assistant connects your Nintendo Switch to Home Assistant through MQTT.
 
 Once configured, it publishes console sensors to Home Assistant and shows Home Assistant popup notifications directly over your game, without opening Tesla Menu.
 
+Having issues, freezes or crashes? See [Troubleshooting](#troubleshooting).
+
 ## What It Does
 
 - Shows battery, charging state, temperature, brightness, volume, and connected controllers in Home Assistant.
@@ -54,9 +56,9 @@ The `.nro` app is only used for setup and configuration. After rebooting, the sy
 
 If you want to add a more polished and visual experience to your Home Assistant dashboard, check out this custom card built on top of Switch Assistant by *hudsonbrendon*:
 
-👉 https://github.com/hudsonbrendon/nintendo-switch-card
+https://github.com/hudsonbrendon/nintendo-switch-card
 
-It provides a clean visual representation of your Nintendo Switch state, including controllers, battery, current game, and more — along with handy controls and notifications.
+It provides a clean visual representation of your Nintendo Switch state, including controllers, battery, current game, and more, along with handy controls and notifications.
 
 <p align="center"> <img src="https://github.com/user-attachments/assets/d30aed7e-9722-4464-852c-28144422cfd8" alt="Nintendo Switch Card preview" width="500"> </p>
 
@@ -111,6 +113,7 @@ Fields to fill in:
 | `Name` | `Nintendo Switch` | Device name shown in Home Assistant. |
 | `Client ID` | `switch-ha-xxxxxxxx` | Generated automatically, editable if needed. |
 | `Boot Delay` | `0` | Seconds to wait before the sysmodule starts system services. Use only if your setup crashes during boot. |
+| `Notifications` | `YES` | Enabled by default. Disable and reboot if the notification overlay crashes your console. |
 
 The Home Assistant token can be long. If entering it on the console is inconvenient, open the app once, then edit this file from your PC:
 
@@ -251,7 +254,7 @@ Press `-` in the app or reboot the console manually.
 
 ### Console crashes during boot
 
-Some custom Atmosphere packs may crash if boot2 sysmodules start system services too early.
+Some custom Atmosphere packs may crash if boot2 sysmodules start system services too early or if the notification overlay is not compatible with that custom CFW.
 
 If the console fails to boot after installing Switch Assistant:
 
@@ -266,10 +269,17 @@ If the console fails to boot after installing Switch Assistant:
 
 4. Put the SD card back in the console and boot normally.
 5. Launch `Switch Assistant` from the Homebrew Menu.
-6. Set `Boot Delay` to `30` seconds.
-7. Press `-` in the app or reboot the console manually.
+6. Set `Notifications` to [NO].
+7. Press `-` in the app.
 
-If the console still crashes, repeat the recovery steps and try a higher value such as `60` seconds.
+- If it works, then the issue was caused by the notification overlay. You will not be able to use notifications anymore, but you can open a new issue with your console details and I will work on making them compatible.
+
+- If you still have issues, sometimes it helps to delay the startup of Switch Assistant so the console has enough time to finish its boot routine. Re-do above steps from 1 to 5 and:
+
+6. Set `Boot Delay` to `30` seconds.
+7. Press `-` in the app.
+
+- If the console still crashes, repeat the recovery steps and try a higher value such as `60` seconds.
 
 `Boot Delay` is saved in:
 
@@ -278,13 +288,6 @@ startup_delay_seconds=30
 ```
 
 The default is `0`, which keeps startup immediate on standard Atmosphere setups.
-
-### Notifications do not appear
-
-- Make sure the notify entity exists in Home Assistant.
-- Send a test notification from Home Assistant.
-- Check that `notification-current.ini` is updated.
-- Reboot the console to make sure the overlay loader and overlay are running.
 
 ## Build From Source
 
