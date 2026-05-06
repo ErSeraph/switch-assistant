@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.5
+
+- Add a configurable Notifications option to disable the notifications if a custom Atmosphere isn't compatible with.
+
 ## v1.4
 
 - Add live screen streaming to Home Assistant via RTSP.

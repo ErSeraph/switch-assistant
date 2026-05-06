@@ -18,7 +18,8 @@ Switch Assistant connects your Nintendo Switch to Home Assistant through MQTT.
 
 Once configured, it publishes console sensors to Home Assistant and shows Home Assistant popup notifications directly over your game, without opening Tesla Menu.
 
-Having issues, freezes or crashes? See [Troubleshooting](#troubleshooting).
+> [!TIP]
+> Having issues, freezes or crashes? See [Troubleshooting](#troubleshooting).
 
 ## What It Does
 
