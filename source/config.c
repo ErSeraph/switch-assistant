@@ -11,6 +11,7 @@
 #define CONFIG_PATH CONFIG_DIR "/config.ini"
 
 static char g_last_error[128] = "no error";
+static bool g_last_load_needs_save = false;
 
 static void set_error(const char *action) {
     snprintf(g_last_error, sizeof(g_last_error), "%s: errno=%d", action, errno);
@@ -22,6 +23,10 @@ const char *config_path(void) {
 
 const char *config_last_error(void) {
     return g_last_error;
+}
+
+bool config_last_load_needs_save(void) {
+    return g_last_load_needs_save;
 }
 
 static bool ensure_config_dir(void) {
@@ -71,11 +76,13 @@ void config_set_defaults(AppConfig *config) {
     snprintf(config->mqtt_topic_prefix, sizeof(config->mqtt_topic_prefix), "homeassistant");
     snprintf(config->device_name, sizeof(config->device_name), "Nintendo Switch");
     config->startup_delay_seconds = 0;
+    config->notification_overlay_enabled = 1;
     config_generate_client_id(config);
 }
 
 bool config_load(AppConfig *config) {
     config_set_defaults(config);
+    g_last_load_needs_save = false;
 
     FILE *file = fopen(CONFIG_PATH, "r");
     if (!file) {
@@ -84,6 +91,7 @@ bool config_load(AppConfig *config) {
     }
 
     char line[512];
+    bool found_notification_overlay_enabled = false;
     while (fgets(line, sizeof(line), file)) {
         trim_eol(line);
         char *sep = strchr(line, '=');
@@ -116,10 +124,14 @@ bool config_load(AppConfig *config) {
             strncpy(config->device_name, value, sizeof(config->device_name) - 1);
         } else if (strcmp(key, "startup_delay_seconds") == 0) {
             config->startup_delay_seconds = clamp_startup_delay(atoi(value));
+        } else if (strcmp(key, "notification_overlay_enabled") == 0) {
+            config->notification_overlay_enabled = atoi(value) != 0 ? 1 : 0;
+            found_notification_overlay_enabled = true;
         }
     }
 
     fclose(file);
+    g_last_load_needs_save = !found_notification_overlay_enabled;
     snprintf(g_last_error, sizeof(g_last_error), "no error");
     return true;
 }
@@ -145,6 +157,7 @@ bool config_save(const AppConfig *config) {
     fprintf(file, "mqtt_client_id=%s\n", config->mqtt_client_id);
     fprintf(file, "device_name=%s\n", config->device_name);
     fprintf(file, "startup_delay_seconds=%d\n", clamp_startup_delay(config->startup_delay_seconds));
+    fprintf(file, "notification_overlay_enabled=%d\n", config->notification_overlay_enabled ? 1 : 0);
 
     if (fflush(file) != 0) {
         set_error("flush config failed");

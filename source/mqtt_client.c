@@ -909,7 +909,11 @@ static void publish_sensor_discovery(AppState *state, int fd, const AppConfig *c
         clear_discovery_topic(fd, config, "sensor", "screen_rtsp_port");
         clear_discovery_topic(fd, config, "camera", "screen_camera");
     }
-    publish_discovery_notify(fd, config, "popup", "Popup Notification");
+    if (config->notification_overlay_enabled) {
+        publish_discovery_notify(fd, config, "popup", "Popup Notification");
+    } else {
+        clear_discovery_topic(fd, config, "notify", "popup");
+    }
     clear_discovery_topic(fd, config, "notify", "modal");
 }
 
@@ -1328,9 +1332,11 @@ static void mqtt_loop(void *arg) {
         char command_topic[SHA_MAX_TOPIC + 32];
         snprintf(command_topic, sizeof(command_topic), "%s/command", prefix);
         mqtt_send_subscribe(fd, command_topic);
-        char popup_topic[192];
-        notification_topic(&config, "popup", popup_topic, sizeof(popup_topic));
-        mqtt_send_subscribe(fd, popup_topic);
+        if (config.notification_overlay_enabled) {
+            char popup_topic[192];
+            notification_topic(&config, "popup", popup_topic, sizeof(popup_topic));
+            mqtt_send_subscribe(fd, popup_topic);
+        }
 
         mutexLock(&state->lock);
         state->mqtt_dns_ok = true;
