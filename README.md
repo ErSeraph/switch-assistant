@@ -4,8 +4,8 @@
   <img src="img/logo.png" alt="Switch Assistant logo" width="220">
 </p>
 <p align="center">
-  <img alt="Home Assistant" src="https://img.shields.io/badge/Home%20Assistant-MQTT-41bdf5?style=for-the-badge">
-  <img alt="Nintendo Switch" src="https://img.shields.io/badge/Nintendo%20Switch-homebrew-e60012?style=for-the-badge">
+  <a href="https://www.home-assistant.io/integrations/mqtt/"><img alt="Home Assistant" src="https://img.shields.io/badge/Home%20Assistant-MQTT-41bdf5?style=for-the-badge"></a>
+  <a href="https://switch.hacks.guide/"><img alt="Nintendo Switch" src="https://img.shields.io/badge/Nintendo%20Switch-homebrew-e60012?style=for-the-badge"></a>
 </p>
 <p align="center">
   <a href="https://github.com/ErSeraph/switch-assistant/releases/latest"><img src="https://img.shields.io/github/v/release/ErSeraph/switch-assistant?style=flat-square" /></a>
