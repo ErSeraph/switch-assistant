@@ -14,6 +14,18 @@
   <a href="https://ko-fi.com/erseraph"><img src="https://img.shields.io/badge/Ko--fi-support-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white" /></a>
 </p>
 
+<p align="center">
+  Available for Nintendo Switch via
+</p>
+
+<p align="center">
+  <img src="img/hbappstore.png" alt="Switch Assistant logo" width="30">
+  <a href="https://hb-app.store/switch/SwitchAssistant">
+    <img alt="HB App Store"
+      src="https://img.shields.io/badge/HB%20App%20Store-Download%20Now-009400?style=for-the-badge">
+  </a>
+</p>
+
 Switch Assistant connects your Nintendo Switch to Home Assistant through MQTT.
 
 Once configured, it publishes console sensors to Home Assistant and shows Home Assistant popup notifications directly over your game, without opening Tesla Menu.
