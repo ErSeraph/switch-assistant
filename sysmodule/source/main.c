@@ -144,12 +144,13 @@ static void power_guard_thread_main(void *arg) {
         if (sleeping != last_sleeping) {
             mutexLock(&state->lock);
             state->power_sleeping = sleeping;
+            state->sensor_publish_requested = true;
             mutexUnlock(&state->lock);
             screen_stream_set_paused(sleeping);
             last_sleeping = sleeping;
         }
 
-        svcSleepThread(sleeping ? 1000ULL * 1000ULL * 1000ULL : 200ULL * 1000ULL * 1000ULL);
+        svcSleepThread(sleeping ? 1000ULL * 1000ULL * 1000ULL : 100ULL * 1000ULL * 1000ULL);
     }
 }
 

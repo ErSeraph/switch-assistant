@@ -936,6 +936,7 @@
 01009630076B8000;大盛りチャリ走DX
 010096500B018000;Cubikolor
 010096500C132000;おしゃべり！カケジョ！～奪われたドットコインを追え！～
+0100965017338000;Super Mario Party Jamboree
 0100969005E98000;60 Seconds!
 010096900A4D2000;Clustertruck
 010096B00A08E000;Octocopter: Double or Squids

@@ -77,10 +77,6 @@ static void mqtt_set_status(AppState *state, bool dns_ok, bool tcp_ok, bool sess
     mutexUnlock(&state->lock);
 }
 
-static bool is_application_program_id(u64 program_id) {
-    return program_id >= 0x0100000000010000ULL;
-}
-
 static bool parse_port(const char *value, int *port) {
     if (!value || *value == '\0') {
         return false;
@@ -684,7 +680,7 @@ static bool get_program_id_quiet(u64 pid, u64 *program_id) {
     return false;
 }
 
-static bool scan_process_list_for_application(AppState *state, u64 *pid_out, u64 *program_id_out) {
+static bool scan_process_list_for_known_game(AppState *state, u64 *pid_out, u64 *program_id_out, char *name, size_t name_size) {
     u64 process_ids[96];
     s32 process_count = 0;
     Result rc = svcGetProcessList(&process_count, process_ids, (u32) (sizeof(process_ids) / sizeof(process_ids[0])));
@@ -704,7 +700,7 @@ static bool scan_process_list_for_application(AppState *state, u64 *pid_out, u64
         if (!get_program_id_quiet(process_ids[i], &program_id)) {
             continue;
         }
-        if (!is_application_program_id(program_id)) {
+        if (!title_cache_lookup(program_id, name, name_size)) {
             continue;
         }
         best_pid = process_ids[i];
@@ -713,7 +709,7 @@ static bool scan_process_list_for_application(AppState *state, u64 *pid_out, u64
     }
 
     if (best_program_id == 0) {
-        set_game_status(state, "process scan no application count=%d", process_count);
+        set_game_status(state, "process scan no known game count=%d", process_count);
         return false;
     }
 
@@ -731,11 +727,8 @@ static bool current_game(AppState *state, u64 *application_id, char *name, size_
     u64 program_id = 0;
     u64 pid = 0;
 
-    if (scan_process_list_for_application(state, &pid, &program_id)) {
+    if (scan_process_list_for_known_game(state, &pid, &program_id, name, name_size)) {
         *application_id = program_id;
-        if (!title_cache_lookup(program_id, name, name_size)) {
-            copy_text(name, name_size, "Unknown");
-        }
         set_game_status(state, "running scan=0x%016llx pid=%llu", (unsigned long long) program_id, (unsigned long long) pid);
         return true;
     }
@@ -941,6 +934,9 @@ static void publish_switch_sensors(AppState *state, int fd, const AppConfig *con
     u32 percent = 0;
     PsmChargerType charger = PsmChargerType_Unconnected;
     PsmBatteryChargeInfoFields info = {0};
+    mutexLock(&state->lock);
+    bool power_sleeping = state->power_sleeping;
+    mutexUnlock(&state->lock);
 
     if (R_SUCCEEDED(psmGetBatteryChargePercentage(&percent))) {
         snprintf(value, sizeof(value), "%u", percent);
@@ -974,7 +970,9 @@ static void publish_switch_sensors(AppState *state, int fd, const AppConfig *con
         publish_if_changed(fd, config, snapshot, force, "battery_health", snapshot->battery_health, sizeof(snapshot->battery_health), "0");
     }
 
-    if (state->svc_lbl_ready) {
+    if (power_sleeping) {
+        publish_if_changed(fd, config, snapshot, force, "backlight", snapshot->backlight, sizeof(snapshot->backlight), "OFF");
+    } else if (state->svc_lbl_ready) {
         float brightness = 0.0f;
         if (R_SUCCEEDED(lblGetCurrentBrightnessSetting(&brightness)) || R_SUCCEEDED(lblGetBrightnessSettingAppliedToBacklight(&brightness))) {
             snprintf(value, sizeof(value), "%.0f", (double) (brightness * 100.0f));
@@ -1355,7 +1353,7 @@ static void mqtt_loop(void *arg) {
 
         while (true) {
             struct pollfd pfd = {.fd = fd, .events = POLLIN};
-            int poll_rc = poll(&pfd, 1, 1000);
+            int poll_rc = poll(&pfd, 1, 100);
             if (poll_rc < 0) {
                 break;
             }
@@ -1373,18 +1371,23 @@ static void mqtt_loop(void *arg) {
             mutexLock(&state->lock);
             should_exit = state->exit_requested;
             power_sleeping = state->power_sleeping;
+            bool sensor_publish_requested = state->sensor_publish_requested;
+            if (sensor_publish_requested) {
+                state->sensor_publish_requested = false;
+            }
             mutexUnlock(&state->lock);
             if (should_exit) {
                 break;
             }
-            if (power_sleeping) {
-                break;
-            }
 
             u64 now = monotonic_ms();
-            if (now - last_sensor_poll_ms >= SENSOR_POLL_INTERVAL_MS) {
+            if (sensor_publish_requested || now - last_sensor_poll_ms >= SENSOR_POLL_INTERVAL_MS) {
                 publish_switch_sensors(state, fd, &config, &sensor_snapshot, false);
                 last_sensor_poll_ms = now;
+            }
+
+            if (power_sleeping) {
+                break;
             }
 
             if (now - last_heartbeat_ms >= MQTT_HEARTBEAT_INTERVAL_MS) {
