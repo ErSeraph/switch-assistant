@@ -5,5 +5,6 @@
 #include <stddef.h>
 
 #define TITLE_CACHE_PATH "sdmc:/switch/switch-ha/titles.txt"
+#define TITLE_INDEX_PATH "sdmc:/switch/switch-ha/titles.idx"
 
 bool title_cache_lookup(u64 application_id, char *out, size_t out_size);

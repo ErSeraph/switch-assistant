@@ -34,6 +34,8 @@ extern const unsigned char switch_ha_overlay_ovl_start[];
 extern const unsigned char switch_ha_overlay_ovl_end[];
 extern const unsigned char switch_ha_titles_txt_start[];
 extern const unsigned char switch_ha_titles_txt_end[];
+extern const unsigned char switch_ha_titles_idx_start[];
+extern const unsigned char switch_ha_titles_idx_end[];
 
 static bool ensure_dir(const char *path) {
     if (mkdir(path, 0777) == 0 || errno == EEXIST) {
@@ -210,6 +212,12 @@ static bool install_sysmodule(AppState *state) {
     size_t titles_size = (size_t) (switch_ha_titles_txt_end - switch_ha_titles_txt_start);
     if (titles_size == 0 || !write_file(TITLE_CACHE_PATH, switch_ha_titles_txt_start, titles_size)) {
         app_state_push_log(state, "Title database install failed");
+        return false;
+    }
+
+    size_t titles_idx_size = (size_t) (switch_ha_titles_idx_end - switch_ha_titles_idx_start);
+    if (titles_idx_size == 0 || !write_file(TITLE_INDEX_PATH, switch_ha_titles_idx_start, titles_idx_size)) {
+        app_state_push_log(state, "Title index install failed");
         return false;
     }
 

@@ -33,3 +33,12 @@ switch_ha_titles_txt_start:
 .incbin "../romfs/titles/titles.txt"
 switch_ha_titles_txt_end:
 .balign 16
+
+.section .rodata.titles_idx, "a", %progbits
+.balign 16
+.global switch_ha_titles_idx_start
+.global switch_ha_titles_idx_end
+switch_ha_titles_idx_start:
+.incbin "../romfs/titles/titles.idx"
+switch_ha_titles_idx_end:
+.balign 16

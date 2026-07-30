@@ -5599,6 +5599,7 @@ Operation: Take Back Earth
 0100516011606000;Bomb
 01005190258D8000;Monsters in Cards
 010051D00C9F8000;Startide
+010051F0207B2000;Tomodachi Life: Living the Dream
 010052001C666000;War Zone Soldier: Battle Royale Shooter
 0100522007AAA000;Wizard of Legend
 010052401A000000;Package Inc

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.8
+
+- Add a compact binary title index to resolve game names without loading the full title database into sysmodule memory, fixing the game title detection (hopefully).
+
+## v1.7
+
+- Update the bundled title database.
+
+## v1.6
+
+- Improve game detection and sleep state publishing.
+
 ## v1.5
 
 - Add a configurable Notifications option to disable the notifications if a custom Atmosphere isn't compatible with.

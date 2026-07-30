@@ -28,6 +28,12 @@ if errorlevel 1 (
     echo Docker image '%IMAGE%' already available.
 )
 
+powershell -ExecutionPolicy Bypass -File "%ROOT%\scripts\generate-title-index.ps1" -InputPath "%ROOT%\romfs\titles\titles.txt" -OutputPath "%ROOT%\romfs\titles\titles.idx"
+if errorlevel 1 (
+    echo Failed to generate title index.
+    exit /b 1
+)
+
 docker run --rm -v "%ROOT%:/workspace" -w /workspace/sysmodule %IMAGE% /bin/bash -lc "make install-layout"
 if errorlevel 1 (
     echo Build command failed: make install-layout
