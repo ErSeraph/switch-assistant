@@ -58,15 +58,44 @@ static int compare_title_entries(const void *lhs, const void *rhs) {
     return 0;
 }
 
-static void title_index_load(void) {
-    if (g_title_index_loaded) {
-        return;
+static int compare_title_entries_by_offset(const void *lhs, const void *rhs) {
+    int result = compare_title_entries(lhs, rhs);
+    if (result != 0) {
+        return result;
     }
-    g_title_index_loaded = true;
+    const TitleIndexEntry *a = (const TitleIndexEntry *) lhs;
+    const TitleIndexEntry *b = (const TitleIndexEntry *) rhs;
+    return a->offset < b->offset ? -1 : a->offset > b->offset;
+}
 
+static bool parse_title_line(char *line, u64 *application_id, char **name) {
+    trim_line(line);
+    char *sep = strchr(line, ';');
+    if (!sep) {
+        return false;
+    }
+    *sep = '\0';
+
+    if (!parse_title_id(line, application_id)) {
+        return false;
+    }
+
+    *name = sep + 1;
+    trim_line(*name);
+    return (*name)[0] != '\0';
+}
+
+static bool read_title_line_at_offset(FILE *file, u64 offset, u64 *application_id, char **name, char *line, size_t line_size) {
+    if (fseek(file, (long) offset, SEEK_SET) != 0 || !fgets(line, line_size, file)) {
+        return false;
+    }
+    return parse_title_line(line, application_id, name);
+}
+
+static bool title_index_read_file(TitleIndexEntry **entries_out, size_t *count_out) {
     FILE *file = fopen(TITLE_INDEX_PATH, "rb");
     if (!file) {
-        return;
+        return false;
     }
 
     unsigned char magic[8];
@@ -81,59 +110,163 @@ static void title_index_load(void) {
         count == 0 ||
         count > 100000) {
         fclose(file);
-        return;
+        return false;
     }
 
     TitleIndexEntry *entries = malloc((size_t) count * sizeof(*entries));
     if (!entries) {
         fclose(file);
-        return;
+        return false;
     }
 
     if (fread(entries, sizeof(*entries), count, file) != count) {
         free(entries);
         fclose(file);
-        return;
+        return false;
     }
 
     fclose(file);
-    g_title_index_entries = entries;
-    g_title_index_entry_count = count;
+    *entries_out = entries;
+    *count_out = count;
+    return true;
 }
 
-static bool read_title_name_at_offset(u64 offset, char *out, size_t out_size) {
-    FILE *file = fopen(TITLE_CACHE_PATH, "r");
+// The index stores byte offsets into titles.txt, so it breaks silently when the
+// text file changes (edited by hand, or checked out with CRLF line endings).
+static bool title_index_matches_text(const TitleIndexEntry *entries, size_t count) {
+    FILE *file = fopen(TITLE_CACHE_PATH, "rb");
     if (!file) {
         return false;
     }
 
-    if (fseek(file, (long) offset, SEEK_SET) != 0) {
+    const TitleIndexEntry *last_line = &entries[0];
+    for (size_t i = 1; i < count; ++i) {
+        if (entries[i].offset > last_line->offset) {
+            last_line = &entries[i];
+        }
+    }
+
+    const TitleIndexEntry *samples[] = {&entries[0], &entries[count / 2], &entries[count - 1], last_line};
+    char line[640];
+    u64 application_id = 0;
+    char *name = NULL;
+    bool ok = true;
+    for (size_t i = 0; ok && i < sizeof(samples) / sizeof(samples[0]); ++i) {
+        ok = read_title_line_at_offset(file, samples[i]->offset, &application_id, &name, line, sizeof(line)) &&
+             application_id == samples[i]->application_id;
+    }
+
+    // Lines appended after the last indexed one are not in the index either.
+    while (ok && fgets(line, sizeof(line), file)) {
+        ok = !parse_title_line(line, &application_id, &name);
+    }
+
+    fclose(file);
+    return ok;
+}
+
+// Collects (title id, line offset) pairs; with entries == NULL it only counts them.
+static size_t title_index_scan_text(FILE *file, TitleIndexEntry *entries, size_t capacity) {
+    size_t count = 0;
+    char line[640];
+    long offset = ftell(file);
+    while (fgets(line, sizeof(line), file)) {
+        long next_offset = ftell(file);
+        size_t len = strlen(line);
+        bool complete = len > 0 && line[len - 1] == '\n';
+
+        u64 application_id = 0;
+        char *name = NULL;
+        if (parse_title_line(line, &application_id, &name)) {
+            if (entries && count < capacity) {
+                entries[count].application_id = application_id;
+                entries[count].offset = (u64) offset;
+            }
+            count++;
+        }
+
+        // Skip the rest of an overlong line so the next offset starts a new line.
+        while (!complete && fgets(line, sizeof(line), file)) {
+            len = strlen(line);
+            complete = len > 0 && line[len - 1] == '\n';
+            next_offset = ftell(file);
+        }
+        offset = next_offset;
+    }
+    return count;
+}
+
+static bool title_index_build_from_text(TitleIndexEntry **entries_out, size_t *count_out) {
+    FILE *file = fopen(TITLE_CACHE_PATH, "rb");
+    if (!file) {
+        return false;
+    }
+
+    // Two passes keep peak memory at the final index size; the sysmodule heap is small.
+    size_t count = title_index_scan_text(file, NULL, 0);
+    TitleIndexEntry *entries = count > 0 && count <= 100000 ? malloc(count * sizeof(*entries)) : NULL;
+    if (!entries || fseek(file, 0, SEEK_SET) != 0) {
+        free(entries);
         fclose(file);
+        return false;
+    }
+    size_t found = title_index_scan_text(file, entries, count);
+    fclose(file);
+    if (found < count) {
+        count = found;
+    }
+    if (count == 0) {
+        free(entries);
+        return false;
+    }
+
+    qsort(entries, count, sizeof(*entries), compare_title_entries_by_offset);
+    size_t unique = 1;
+    for (size_t i = 1; i < count; ++i) {
+        if (entries[i].application_id != entries[unique - 1].application_id) {
+            entries[unique++] = entries[i];
+        }
+    }
+
+    *entries_out = entries;
+    *count_out = unique;
+    return true;
+}
+
+static void title_index_load(void) {
+    if (g_title_index_loaded) {
+        return;
+    }
+    g_title_index_loaded = true;
+
+    TitleIndexEntry *entries = NULL;
+    size_t count = 0;
+    if (title_index_read_file(&entries, &count) && title_index_matches_text(entries, count)) {
+        g_title_index_entries = entries;
+        g_title_index_entry_count = count;
+        return;
+    }
+    free(entries);
+    entries = NULL;
+
+    if (title_index_build_from_text(&entries, &count)) {
+        g_title_index_entries = entries;
+        g_title_index_entry_count = count;
+    }
+}
+
+static bool read_title_name_at_offset(u64 offset, char *out, size_t out_size) {
+    FILE *file = fopen(TITLE_CACHE_PATH, "rb");
+    if (!file) {
         return false;
     }
 
     char line[640];
-    if (!fgets(line, sizeof(line), file)) {
-        fclose(file);
-        return false;
-    }
-    fclose(file);
-
-    trim_line(line);
-    char *sep = strchr(line, ';');
-    if (!sep) {
-        return false;
-    }
-    *sep = '\0';
-
     u64 parsed_application_id = 0;
-    if (!parse_title_id(line, &parsed_application_id)) {
-        return false;
-    }
-
-    char *name = sep + 1;
-    trim_line(name);
-    if (name[0] == '\0') {
+    char *name = NULL;
+    bool ok = read_title_line_at_offset(file, offset, &parsed_application_id, &name, line, sizeof(line));
+    fclose(file);
+    if (!ok) {
         return false;
     }
 
