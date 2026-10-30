@@ -866,7 +866,7 @@ static void publish_sensor_discovery(AppState *state, int fd, const AppConfig *c
     publish_discovery_sensor(fd, config, "binary_sensor", "charging", "Is Charging", "battery_charging", NULL, NULL);
     publish_discovery_sensor(fd, config, "sensor", "charger_type", "Charger Type", NULL, NULL, NULL);
     publish_discovery_sensor(fd, config, "sensor", "battery_voltage", "Battery Voltage", "voltage", "mV", "measurement");
-    publish_discovery_sensor(fd, config, "sensor", "battery_temperature", "Battery Temperature", "temperature", "C", "measurement");
+    publish_discovery_sensor(fd, config, "sensor", "battery_temperature", "Battery Temperature", "temperature", "\\u00b0C", "measurement");
     publish_discovery_sensor(fd, config, "sensor", "battery_health", "Battery Health", NULL, "%", "measurement");
 
     if (state->svc_lbl_ready) {
