@@ -17,7 +17,7 @@
 
 static Result g_socket_init_result = RESULT_NOT_INITIALIZED;
 static Result g_psm_init_result = RESULT_NOT_INITIALIZED;
-static Result g_spsm_init_result = RESULT_NOT_INITIALIZED;
+static Result g_spsm_probe_result = RESULT_NOT_INITIALIZED;
 static Result g_hid_init_result = RESULT_NOT_INITIALIZED;
 static Result g_lbl_init_result = RESULT_NOT_INITIALIZED;
 static Result g_audctl_init_result = RESULT_NOT_INITIALIZED;
@@ -59,10 +59,8 @@ void __appExit(void) {
     }
     if (R_SUCCEEDED(g_pminfo_init_result)) pminfoExit();
     if (R_SUCCEEDED(g_audctl_init_result)) audctlExit();
-    if (R_SUCCEEDED(g_lbl_init_result)) lblExit();
     if (R_SUCCEEDED(g_hid_init_result)) hidExit();
     screen_stream_stop();
-    if (R_SUCCEEDED(g_spsm_init_result)) spsmExit();
     if (R_SUCCEEDED(g_psm_init_result)) psmExit();
     if (R_SUCCEEDED(g_socket_init_result)) socketExit();
     fsdevUnmountAll();
@@ -114,9 +112,12 @@ static void init_core_services(AppState *state) {
     g_psm_init_result = psmInitialize();
     append_log_result("psm_init", g_psm_init_result);
 
-    g_spsm_init_result = spsmInitialize();
-    state->svc_spsm_ready = R_SUCCEEDED(g_spsm_init_result);
-    append_log_result("spsm_init", g_spsm_init_result);
+    // Only probe spsm here: keeping a session open exhausts its session limit
+    // and makes fatal/am abort on reboot (OutOfSessions, 0x615).
+    g_spsm_probe_result = spsmInitialize();
+    if (R_SUCCEEDED(g_spsm_probe_result)) spsmExit();
+    state->svc_spsm_ready = R_SUCCEEDED(g_spsm_probe_result);
+    append_log_result("spsm_probe", g_spsm_probe_result);
 
     smExit();
     append_log("core service init done");
@@ -133,7 +134,11 @@ static void power_guard_thread_main(void *arg) {
         }
 
         LblBacklightSwitchStatus backlight = LblBacklightSwitchStatus_Enabled;
-        Result rc = lblGetBacklightSwitchStatus(&backlight);
+        Result rc = app_lbl_open();
+        if (R_SUCCEEDED(rc)) {
+            rc = lblGetBacklightSwitchStatus(&backlight);
+            app_lbl_close();
+        }
         if (R_FAILED(rc)) {
             svcSleepThread(250ULL * 1000ULL * 1000ULL);
             continue;
@@ -150,7 +155,7 @@ static void power_guard_thread_main(void *arg) {
             last_sleeping = sleeping;
         }
 
-        svcSleepThread(sleeping ? 1000ULL * 1000ULL * 1000ULL : 100ULL * 1000ULL * 1000ULL);
+        svcSleepThread(sleeping ? 1000ULL * 1000ULL * 1000ULL : 250ULL * 1000ULL * 1000ULL);
     }
 }
 
@@ -204,6 +209,7 @@ static void optional_init_thread(void *arg) {
                 break;
             case OptionalService_Lbl:
                 rc = lblInitialize();
+                if (R_SUCCEEDED(rc)) lblExit();
                 break;
             case OptionalService_Audctl:
                 rc = audctlInitialize();
@@ -275,7 +281,7 @@ static void init_optional_services(AppState *state) {
 
     g_lbl_init_result = init_service_with_timeout("lbl", OptionalService_Lbl);
     state->svc_lbl_ready = R_SUCCEEDED(g_lbl_init_result);
-    append_log_result("lbl_init", g_lbl_init_result);
+    append_log_result("lbl_probe", g_lbl_init_result);
 
     g_audctl_init_result = init_service_with_timeout("audctl", OptionalService_Audctl);
     state->svc_audctl_ready = R_SUCCEEDED(g_audctl_init_result);
@@ -308,7 +314,7 @@ static void write_heartbeat(AppState *state) {
     fprintf(file, "socket_init=0x%x\n", g_socket_init_result);
     fprintf(file, "socket_last=0x%x\n", socketGetLastResult());
     fprintf(file, "psm_init=0x%x\n", g_psm_init_result);
-    fprintf(file, "spsm_init=0x%x\n", g_spsm_init_result);
+    fprintf(file, "spsm_probe=0x%x\n", g_spsm_probe_result);
     fprintf(file, "grcd_open=0x%x\n", screen_stream_get_grcd_open_result());
     fprintf(file, "grcd_begin=0x%x\n", screen_stream_get_grcd_begin_result());
     {
@@ -318,7 +324,7 @@ static void write_heartbeat(AppState *state) {
         fprintf(file, "screen_rtsp_port=%u\n", screen_stream_port());
     }
     fprintf(file, "hid_init=0x%x\n", g_hid_init_result);
-    fprintf(file, "lbl_init=0x%x\n", g_lbl_init_result);
+    fprintf(file, "lbl_probe=0x%x\n", g_lbl_init_result);
     fprintf(file, "audctl_init=0x%x\n", g_audctl_init_result);
     fprintf(file, "pminfo_init=0x%x\n", g_pminfo_init_result);
     mutexUnlock(&state->lock);

@@ -972,7 +972,7 @@ static void publish_switch_sensors(AppState *state, int fd, const AppConfig *con
 
     if (power_sleeping) {
         publish_if_changed(fd, config, snapshot, force, "backlight", snapshot->backlight, sizeof(snapshot->backlight), "OFF");
-    } else if (state->svc_lbl_ready) {
+    } else if (state->svc_lbl_ready && R_SUCCEEDED(app_lbl_open())) {
         float brightness = 0.0f;
         if (R_SUCCEEDED(lblGetCurrentBrightnessSetting(&brightness)) || R_SUCCEEDED(lblGetBrightnessSettingAppliedToBacklight(&brightness))) {
             snprintf(value, sizeof(value), "%.0f", (double) (brightness * 100.0f));
@@ -984,6 +984,7 @@ static void publish_switch_sensors(AppState *state, int fd, const AppConfig *con
             publish_if_changed(fd, config, snapshot, force, "backlight", snapshot->backlight, sizeof(snapshot->backlight),
                                backlight == LblBacklightSwitchStatus_Enabled || backlight == LblBacklightSwitchStatus_Enabling ? "ON" : "OFF");
         }
+        app_lbl_close();
     }
 
     if (state->svc_audctl_ready) {
@@ -1113,6 +1114,22 @@ static bool read_mqtt_remaining_length(const unsigned char *buffer, int size, in
     return false;
 }
 
+static void request_power_off(AppState *state, bool reboot) {
+    // Open spsm only for the duration of the request so other processes can
+    // still get a session when the console goes down.
+    Result rc = smInitialize();
+    if (R_SUCCEEDED(rc)) {
+        rc = spsmInitialize();
+        smExit();
+    }
+    if (R_FAILED(rc)) {
+        app_state_push_log(state, "%s failed: spsm 0x%x", reboot ? "Reboot" : "Shutdown", rc);
+        return;
+    }
+    spsmShutdown(reboot);
+    spsmExit();
+}
+
 static void handle_command_payload(AppState *state, int fd, const AppConfig *config, const char *payload) {
     if (!payload || payload[0] == '\0') {
         return;
@@ -1126,14 +1143,14 @@ static void handle_command_payload(AppState *state, int fd, const AppConfig *con
             return;
         }
         app_state_push_log(state, "Reboot command accepted");
-        spsmShutdown(true);
+        request_power_off(state, true);
     } else if (strcasecmp(payload, "shutdown") == 0 || strcasecmp(payload, "poweroff") == 0) {
         if (!state->svc_spsm_ready) {
             app_state_push_log(state, "Shutdown unavailable: spsm not ready");
             return;
         }
         app_state_push_log(state, "Shutdown command accepted");
-        spsmShutdown(false);
+        request_power_off(state, false);
     } else if (strcasecmp(payload, "sleep") == 0 || strcasecmp(payload, "standby") == 0) {
         app_state_push_log(state, "Sleep command removed: unsupported in sysmodule");
     } else {

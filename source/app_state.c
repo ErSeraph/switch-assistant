@@ -47,3 +47,19 @@ void app_state_push_log(AppState *state, const char *fmt, ...) {
     }
     mutexUnlock(&state->lock);
 }
+
+// fatal opens its own lbl session when it shows an error screen and aborts if
+// none is left, so lbl must never stay open for the lifetime of the process.
+Result app_lbl_open(void) {
+    Result rc = smInitialize();
+    if (R_FAILED(rc)) {
+        return rc;
+    }
+    rc = lblInitialize();
+    smExit();
+    return rc;
+}
+
+void app_lbl_close(void) {
+    lblExit();
+}

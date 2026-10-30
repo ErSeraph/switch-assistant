@@ -62,3 +62,5 @@ typedef struct {
 void app_state_init(AppState *state);
 void app_state_set_status(AppState *state, const char *fmt, ...);
 void app_state_push_log(AppState *state, const char *fmt, ...);
+Result app_lbl_open(void);
+void app_lbl_close(void);
