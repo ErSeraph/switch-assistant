@@ -226,7 +226,7 @@ jobs:
           cp overlay-loader/atmosphere/contents/00FF000053484102/exefs.nsp dist/atmosphere/contents/00FF000053484102/exefs.nsp || true
 
       - name: Upload Switch Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: switch-binaries
           path: dist/
