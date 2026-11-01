@@ -41,8 +41,8 @@ jobs:
       custom_components: ${{ steps.filter.outputs.custom_components }}
       hacs: ${{ steps.filter.outputs.hacs }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dorny/paths-filter@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: dorny/paths-filter@v4.0.3
         id: filter
         with:
           filters: |
@@ -76,12 +76,12 @@ jobs:
       has_components: ${{ steps.check_integration.outputs.has_components }}
       has_hacs: ${{ steps.check_integration.outputs.has_hacs }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v7.1.0
         with:
-          python-version: '3.15'
+          python-version: '3.15.2'
 
       - name: Install Python Dependencies
         run: |
@@ -121,7 +121,7 @@ jobs:
           ruff format . || true
 
       - name: Commit and push changes
-        uses: stefanzweifel/git-auto-commit-action@v7
+        uses: stefanzweifel/git-auto-commit-action@v7.2.1
         with:
           commit_message: "style: auto-fix and format with Ruff [skip ci]"
           commit_user_name: "github-actions[bot]"
@@ -146,7 +146,7 @@ jobs:
           fi
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
@@ -157,7 +157,7 @@ jobs:
     needs: lint-test
     if: needs.lint-test.outputs.has_components == 'true'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Validate with Hassfest
         uses: home-assistant/actions/hassfest@master
 
@@ -167,7 +167,7 @@ jobs:
     needs: lint-test
     if: needs.lint-test.outputs.has_hacs == 'true'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: HACS validation
         uses: hacs/action@main
         with:
@@ -184,15 +184,15 @@ jobs:
       security-events: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v4.39.1
         with:
           languages: python
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v4.39.1
 
   validate-sysmodule:
     name: Validate Sysmodule & Build
@@ -200,7 +200,7 @@ jobs:
     if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.switch == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Validate JSON Structure and Syscalls
         run: |
@@ -226,7 +226,7 @@ jobs:
           cp overlay-loader/atmosphere/contents/00FF000053484102/exefs.nsp dist/atmosphere/contents/00FF000053484102/exefs.nsp || true
 
       - name: Upload Switch Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: switch-binaries
           path: dist/
@@ -242,7 +242,7 @@ jobs:
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled')
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Enable Auto Merge
         run: gh pr merge --squash "$PR_URL"
         env:
