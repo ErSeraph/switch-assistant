@@ -19,12 +19,14 @@
 typedef struct {
     Thread thread;
     bool active;
-    int socket_fd;
+    volatile int socket_fd;  // also read by the psc thread (mqtt_service_socket_idle)
+    // True while mqtt_socket_connect_to() runs: its socket is not in socket_fd yet.
+    volatile bool connecting;
 } MqttContext;
 
 #define OVERLAY_POLL_INTERVAL_MS 1000
 
-static MqttContext g_ctx = {0};
+static MqttContext g_ctx = {.socket_fd = -1};
 
 static void mqtt_loop(void *arg) {
     AppState *state = arg;
@@ -81,7 +83,26 @@ static void mqtt_loop(void *arg) {
 
         int fd = -1;
         app_state_push_log(state, "MQTT connecting %s:%d", host, port);
-        if (!mqtt_socket_connect_to(state, host, port, &fd)) {
+        g_ctx.connecting = true;
+        bool connected_ok = mqtt_socket_connect_to(state, host, port, &fd);
+        if (connected_ok) {
+            g_ctx.socket_fd = fd;
+        }
+        g_ctx.connecting = false;
+
+        // The console may have started to sleep while connect() was blocking:
+        // drop the socket right away instead of starting the session (discovery
+        // takes long and psc is waiting for the socket to be closed).
+        mutexLock(&state->lock);
+        power_sleeping = state->power_sleeping;
+        mutexUnlock(&state->lock);
+        if (connected_ok && power_sleeping) {
+            close(fd);
+            g_ctx.socket_fd = -1;
+            continue;
+        }
+
+        if (!connected_ok) {
             mutexLock(&state->lock);
             char error[SHA_LOG_LINE];
             strncpy(error, state->mqtt_last_error, sizeof(error) - 1);
@@ -280,6 +301,12 @@ static void mqtt_loop(void *arg) {
                 last_overlay_poll_ms = now;
             }
             if (sensor_publish_requested || now - last_sensor_poll_ms >= SENSOR_POLL_INTERVAL_MS) {
+                if (sensor_publish_requested) {
+                    // Commands (brightness, backlight, ...) publish optimistic
+                    // states directly; forget what was published so the real
+                    // values are sent again even if they did not change.
+                    sensor_snapshot.topic_cache_count = 0;
+                }
                 mqtt_publish_switch_sensors(state, fd, &config, &sensor_snapshot, false);
                 last_sensor_poll_ms = now;
             }
@@ -321,6 +348,10 @@ static void mqtt_loop(void *arg) {
         }
         svcSleepThread(1000ULL * 1000ULL * 1000ULL);
     }
+}
+
+bool mqtt_service_socket_idle(void) {
+    return g_ctx.socket_fd < 0 && !g_ctx.connecting;
 }
 
 bool mqtt_service_start(AppState *state) {

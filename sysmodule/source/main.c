@@ -54,6 +54,22 @@ void __appInit(void) {
         diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_InitFail_SM));
     }
 
+    // A custom __appInit skips libnx's default one, which is what sets the
+    // firmware version. Without it hosversionGet() returns 0 and libnx takes
+    // its old-firmware code paths: psc acknowledges with the pre-5.1.0
+    // command, psm reads the pre-17.0.0 battery struct layout, nifm uses the
+    // pre-3.0.0 general service, ...
+    if (hosversionGet() == 0) {
+        rc = setsysInitialize();
+        if (R_SUCCEEDED(rc)) {
+            SetSysFirmwareVersion fw;
+            if (R_SUCCEEDED(setsysGetFirmwareVersion(&fw))) {
+                hosversionSet(MAKEHOSVERSION(fw.major, fw.minor, fw.micro));
+            }
+            setsysExit();
+        }
+    }
+
     rc = fsInitialize();
     if (R_FAILED(rc)) {
         diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_InitFail_FS));
@@ -140,7 +156,7 @@ static bool wait_for_sockets_closed(AppState *state) {
         mutexLock(&state->lock);
         bool connected = state->mqtt_connected;
         mutexUnlock(&state->lock);
-        if (!connected && screen_stream_sockets_closed()) {
+        if (!connected && mqtt_service_socket_idle() && screen_stream_sockets_closed()) {
             return true;
         }
         svcSleepThread(50ULL * 1000ULL * 1000ULL);
@@ -431,6 +447,7 @@ static void write_heartbeat(AppState *state) {
     fprintf(file, "ts_init=0x%x\n", g_ts_init_result);
     fprintf(file, "nifm_init=0x%x\n", g_nifm_init_result);
     fprintf(file, "psc_init=0x%x\n", g_psc_init_result);
+    fprintf(file, "hos_version=%u.%u.%u\n", HOSVER_MAJOR(hosversionGet()), HOSVER_MINOR(hosversionGet()), HOSVER_MICRO(hosversionGet()));
     mutexUnlock(&state->lock);
 
     fclose(file);
