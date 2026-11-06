@@ -49,6 +49,20 @@ static void mqtt_publish_cmd_status(int fd, const AppConfig *config, const char 
     mqtt_send_publish(fd, stat_topic, payload, false);
 }
 
+typedef enum {
+    PowerAction_Reboot,
+    PowerAction_Shutdown,
+    PowerAction_Sleep,
+} PowerAction;
+
+static const char *power_action_name(PowerAction action) {
+    switch (action) {
+        case PowerAction_Reboot: return "reboot";
+        case PowerAction_Shutdown: return "shutdown";
+        default: return "sleep";
+    }
+}
+
 // spsm is opened only for the request: keeping a session open makes fatal/am
 // abort on reboot (OutOfSessions, 0x615).
 static Result request_power_off(bool reboot) {
@@ -72,18 +86,78 @@ static Result request_sleep_spsm(void) {
     return rc;
 }
 
-static void handle_power_off_command(AppState *state, int fd, const AppConfig *config, bool reboot, const char *source) {
-    const char *name = reboot ? "reboot" : "shutdown";
+// Power requests run on their own short-lived thread. spsm does not return
+// until the power sequence moves on, and that sequence (psc) waits for the MQTT
+// thread to publish the "off" states and close its socket; doing the request
+// on the MQTT thread would block it until psc's timeout, with the socket open.
+static Thread g_power_thread;
+static bool g_power_thread_created = false;
+static volatile bool g_power_thread_done = false;
+static PowerAction g_power_action;
+static AppState *g_power_state = NULL;
+
+static void power_action_thread(void *arg) {
+    (void) arg;
+    PowerAction action = g_power_action;
+    Result rc;
+    if (action == PowerAction_Sleep) {
+        rc = request_sleep_spsm();
+        if (R_FAILED(rc)) {
+            LOG_W("power", "sleep via spsm failed rc=0x%x, using svcSleepSystem", rc);
+            // Privileged syscall svcSleepSystem (0x4D) fallback
+            svcSleepSystem();
+            rc = 0;
+        }
+    } else {
+        rc = request_power_off(action == PowerAction_Reboot);
+    }
+    if (R_FAILED(rc)) {
+        LOG_W("power", "%s failed rc=0x%x", power_action_name(action), rc);
+        if (g_power_state) {
+            app_state_push_log(g_power_state, "%s failed: spsm 0x%x", power_action_name(action), rc);
+        }
+    }
+    g_power_thread_done = true;
+}
+
+static bool start_power_action(AppState *state, PowerAction action) {
+    if (g_power_thread_created) {
+        if (!g_power_thread_done) {
+            return false;  // A request is still in progress.
+        }
+        threadWaitForExit(&g_power_thread);
+        threadClose(&g_power_thread);
+        g_power_thread_created = false;
+    }
+    g_power_action = action;
+    g_power_state = state;
+    g_power_thread_done = false;
+    if (R_FAILED(threadCreate(&g_power_thread, power_action_thread, NULL, NULL, 0x4000, 0x2B, -2))) {
+        return false;
+    }
+    if (R_FAILED(threadStart(&g_power_thread))) {
+        threadClose(&g_power_thread);
+        return false;
+    }
+    g_power_thread_created = true;
+    return true;
+}
+
+static void handle_power_command(AppState *state, int fd, const AppConfig *config, PowerAction action, const char *source) {
+    const char *name = power_action_name(action);
     LOG_I("mqtt", "%s %s accepted", source, name);
     app_state_push_log(state, "%s %s accepted", source, name);
-    // Published first: on success the console goes down and the call may not return.
-    mqtt_publish_cmd_status(fd, config, name, "success");
-    Result rc = request_power_off(reboot);
-    if (R_FAILED(rc)) {
-        LOG_W("mqtt", "%s %s failed rc=0x%x", source, name, rc);
-        app_state_push_log(state, "%s %s failed: spsm 0x%x", source, name, rc);
-        mqtt_publish_cmd_status(fd, config, name, "failed_spsm");
+    if (start_power_action(state, action)) {
+        mqtt_publish_cmd_status(fd, config, name, "success");
+    } else {
+        LOG_W("mqtt", "%s %s failed to start", source, name);
+        app_state_push_log(state, "%s %s failed to start", source, name);
+        mqtt_publish_cmd_status(fd, config, name, "failed");
     }
+}
+
+static void handle_power_off_command(AppState *state, int fd, const AppConfig *config, bool reboot, const char *source) {
+    handle_power_command(state, fd, config, reboot ? PowerAction_Reboot : PowerAction_Shutdown, source);
 }
 
 static void handle_remote_command(AppState *state, int fd, const AppConfig *config, const char *cmd) {
@@ -98,24 +172,18 @@ static void handle_remote_command(AppState *state, int fd, const AppConfig *conf
         handle_power_off_command(state, fd, config, false, "Remote");
     } else if (strcasecmp(cmd, "sleep") == 0 || strcasecmp(cmd, "standby") == 0) {
         app_state_push_log(state, "Remote sleep requested");
-        Result rc = MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
         if (state->app_mode != AppMode_Sysmodule) {
-            rc = appletRequestToSleep();
+            Result rc = appletRequestToSleep();
             if (R_FAILED(rc)) {
                 rc = appletStartSleepSequence(true);
             }
+            LOG_I("mqtt", "Remote sleep rc=0x%x (mode=%d)", rc, state->app_mode);
+            app_state_push_log(state, "Remote sleep rc=0x%x", rc);
+            mqtt_publish_cmd_status(fd, config, "sleep", R_SUCCEEDED(rc) ? "success" : "failed");
         } else {
-            // In sysmodule mode: use spsm / svcSleepSystem
-            rc = request_sleep_spsm();
-            if (R_FAILED(rc)) {
-                // Privileged syscall svcSleepSystem (0x4D) fallback
-                svcSleepSystem();
-                rc = 0;
-            }
+            // In sysmodule mode: spsm (or svcSleepSystem) on the power thread
+            handle_power_command(state, fd, config, PowerAction_Sleep, "Remote");
         }
-        LOG_I("mqtt", "Remote sleep rc=0x%x (mode=%d)", rc, state->app_mode);
-        app_state_push_log(state, "Remote sleep rc=0x%x", rc);
-        mqtt_publish_cmd_status(fd, config, "sleep", R_SUCCEEDED(rc) ? "success" : "failed");
     } else if (strcasecmp(cmd, "close_game") == 0 || strcasecmp(cmd, "close") == 0 || strcasecmp(cmd, "exit_game") == 0) {
         app_state_push_log(state, "Remote close game requested");
         bool terminated = false;

@@ -32,3 +32,4 @@ bool mqtt_send_publish_bytes(int fd, const char *topic, const void *payload, siz
 bool mqtt_send_publish(int fd, const char *topic, const char *payload, bool retain);
 bool mqtt_send_subscribe(int fd, const char *topic);
 bool mqtt_send_ping(int fd);
+bool mqtt_send_disconnect(int fd);

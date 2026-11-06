@@ -32,6 +32,7 @@ static void mqtt_loop(void *arg) {
     while (true) {
         mutexLock(&state->lock);
         bool should_exit = state->exit_requested;
+        bool power_sleeping = state->power_sleeping;
         AppConfig config = state->config;
         char prefix[SHA_MAX_TOPIC];
         strncpy(prefix, state->config.mqtt_topic_prefix, sizeof(prefix) - 1);
@@ -44,6 +45,14 @@ static void mqtt_loop(void *arg) {
 
         if (should_exit) {
             break;
+        }
+
+        // No connection while the console sleeps or shuts down: psc waits for
+        // the socket to be closed before it lets the transition go on.
+        if (power_sleeping) {
+            mqtt_set_status(state, false, false, false, "sleeping");
+            svcSleepThread(1000 * 1000 * 1000ULL);
+            continue;
         }
 
         if (host[0] == '\0' || prefix[0] == '\0') {
@@ -248,6 +257,7 @@ static void mqtt_loop(void *arg) {
 
             mutexLock(&state->lock);
             should_exit = state->exit_requested;
+            power_sleeping = state->power_sleeping;
             bool sensor_publish_requested = state->sensor_publish_requested;
             if (sensor_publish_requested) {
                 state->sensor_publish_requested = false;
@@ -262,6 +272,15 @@ static void mqtt_loop(void *arg) {
             if (sensor_publish_requested || now - last_sensor_poll_ms >= SENSOR_POLL_INTERVAL_MS) {
                 mqtt_publish_switch_sensors(state, fd, &config, &sensor_snapshot, false);
                 last_sensor_poll_ms = now;
+            }
+
+            if (power_sleeping) {
+                // The sensor publish above already sent the sleeping states
+                // (media player "off", remote "OFF", backlight "OFF"). A clean
+                // DISCONNECT keeps the broker from firing the "offline" will, so
+                // Home Assistant shows the console as off, not unavailable.
+                mqtt_send_disconnect(fd);
+                break;
             }
 
             if (now - last_heartbeat_ms >= MQTT_HEARTBEAT_INTERVAL_MS) {

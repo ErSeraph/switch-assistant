@@ -16,6 +16,9 @@
 #define OPTIONAL_INIT_TIMEOUT_NS (1500ULL * 1000ULL * 1000ULL)
 #define RESULT_OPTIONAL_TIMEOUT MAKERESULT(Module_Libnx, LibnxError_Timeout)
 #define RESULT_NOT_INITIALIZED MAKERESULT(Module_Libnx, LibnxError_NotInitialized)
+// Far outside the ids used by the system (Nintendo keeps adding ids below 128).
+#define SHA_PSC_MODULE_ID ((PscPmModuleId) 0x5348)
+#define SLEEP_SOCKETS_TIMEOUT_MS 3000
 
 static Result g_socket_init_result = RESULT_NOT_INITIALIZED;
 static Result g_psm_init_result = RESULT_NOT_INITIALIZED;
@@ -28,6 +31,8 @@ static Result g_pminfo_init_result = RESULT_NOT_INITIALIZED;
 static Result g_setsys_init_result = RESULT_NOT_INITIALIZED;
 static Result g_ts_init_result = RESULT_NOT_INITIALIZED;
 static Result g_nifm_init_result = RESULT_NOT_INITIALIZED;
+static Result g_psc_init_result = RESULT_NOT_INITIALIZED;
+static PscPmModule g_psc_module;
 static Thread g_power_guard_thread = {0};
 static bool g_power_guard_thread_active = false;
 
@@ -60,6 +65,11 @@ void __appExit(void) {
     if (g_power_guard_thread_active) {
         threadClose(&g_power_guard_thread);
         g_power_guard_thread_active = false;
+    }
+    if (R_SUCCEEDED(g_psc_init_result)) {
+        pscPmModuleFinalize(&g_psc_module);
+        pscPmModuleClose(&g_psc_module);
+        pscmExit();
     }
     if (R_SUCCEEDED(g_nifm_init_result)) nifmExit();
     if (R_SUCCEEDED(g_ts_init_result)) tsExit();
@@ -115,37 +125,113 @@ static void init_core_services(AppState *state) {
     LOG_I("sys", "Core service init completed");
 }
 
+static void set_power_sleeping(AppState *state, bool sleeping) {
+    mutexLock(&state->lock);
+    state->power_sleeping = sleeping;
+    state->sensor_publish_requested = true;
+    mutexUnlock(&state->lock);
+    screen_stream_set_paused(sleeping);
+}
+
+// Live sockets and in-flight poll() calls make the power transition fail
+// (omm then aborts with a psc error), so both MQTT and RTSP must be closed
+// before the request is acknowledged. The MQTT thread sees power_sleeping,
+// publishes the "off" states, disconnects cleanly and closes its socket.
+static bool wait_for_sockets_closed(AppState *state) {
+    u64 deadline = monotonic_ms() + SLEEP_SOCKETS_TIMEOUT_MS;
+    while (monotonic_ms() < deadline) {
+        mutexLock(&state->lock);
+        bool connected = state->mqtt_connected;
+        mutexUnlock(&state->lock);
+        if (!connected && screen_stream_sockets_closed()) {
+            return true;
+        }
+        svcSleepThread(50ULL * 1000ULL * 1000ULL);
+    }
+    return false;
+}
+
+// psc notifies registered modules before the console sleeps or shuts down and
+// after it wakes, in handheld and docked mode alike. The handheld backlight
+// cannot be used for this: it is also off while docked, which used to pause
+// the RTSP stream whenever the console was in the dock.
+// libnx names the states differently; the official names are used in the
+// comments: 0 FullAwake, 1 MinimumAwake, 2 SleepReady,
+// 3 EssentialServicesSleepReady, 4 EssentialServicesAwake, 5 ShutdownReady.
 static void power_guard_thread_main(void *arg) {
     AppState *state = arg;
-    bool last_sleeping = false;
 
     while (true) {
-        // In sysmodule mode, appletGetOperationMode() is not available / returns 0.
-        // Screen backlight turning off or dimming must NOT mark the system as sleeping!
-        // When power_sleeping was set to true, MQTT heartbeats stopped and HA marked
-        // all entities as unavailable.
-        // We only use backlight status to pause RTSP screen streaming if screen is off in handheld.
-        bool screen_off = false;
-        if (state->svc_lbl_ready && R_SUCCEEDED(svc_open(SvcId_Lbl))) {
-            LblBacklightSwitchStatus backlight = LblBacklightSwitchStatus_Enabled;
-            if (R_SUCCEEDED(lblGetBacklightSwitchStatus(&backlight))) {
-                screen_off = (backlight == LblBacklightSwitchStatus_Disabled ||
-                              backlight == LblBacklightSwitchStatus_Disabling);
-            }
-            svc_close(SvcId_Lbl);
+        if (R_FAILED(eventWait(&g_psc_module.event, UINT64_MAX))) {
+            continue;
         }
 
-        if (screen_off != last_sleeping) {
-            screen_stream_set_paused(screen_off);
-            last_sleeping = screen_off;
+        PscPmState pm_state;
+        u32 flags = 0;
+        if (R_FAILED(pscPmModuleGetRequest(&g_psc_module, &pm_state, &flags))) {
+            continue;
         }
 
-        svcSleepThread(1000ULL * 1000ULL * 1000ULL);
+        // psc waits for every module with a deadline, so nothing slow may run
+        // before the acknowledgement. LOG_* writes to the SD card through the
+        // single fs session shared by all threads, so it is done afterwards.
+        const char *event = NULL;
+        bool sockets_closed = true;
+        switch (pm_state) {
+            case PscPmState_ReadySleep:          // SleepReady
+            case PscPmState_ReadySleepCritical:  // EssentialServicesSleepReady
+            case PscPmState_ReadyShutdown:       // ShutdownReady
+                if (!state->power_sleeping) {
+                    set_power_sleeping(state, true);
+                    sockets_closed = wait_for_sockets_closed(state);
+                    event = pm_state == PscPmState_ReadyShutdown ? "shutdown" : "sleep";
+                }
+                break;
+            case PscPmState_Awake:               // FullAwake
+            case PscPmState_ReadyAwaken:         // MinimumAwake
+                if (state->power_sleeping) {
+                    set_power_sleeping(state, false);
+                    event = "awake";
+                }
+                break;
+            default:                             // EssentialServicesAwake
+                break;
+        }
+
+        pscPmModuleAcknowledge(&g_psc_module, pm_state);
+
+        if (event) {
+            LOG_I("power", "power: %s", event);
+        }
+        if (!sockets_closed) {
+            LOG_W("power", "power: sockets close timed out");
+        }
     }
 }
 
 static void init_power_guard(AppState *state) {
-    Result rc = threadCreate(&g_power_guard_thread, power_guard_thread_main, state, NULL, 0x4000, 0x2B, -2);
+    // Only Fs: depending on modules that may not be registered (WlanSockets, Nifm)
+    // breaks psc dispatch and makes psc abort on the next transition.
+    static const u32 dependencies[] = {PscPmModuleId_Fs};
+
+    Result rc = smInitialize();
+    if (R_SUCCEEDED(rc)) {
+        rc = pscmInitialize();
+        if (R_SUCCEEDED(rc)) {
+            rc = pscmGetPmModule(&g_psc_module, SHA_PSC_MODULE_ID, dependencies, sizeof(dependencies) / sizeof(dependencies[0]), true);
+            if (R_FAILED(rc)) {
+                pscmExit();
+            }
+        }
+        smExit();
+    }
+    g_psc_init_result = rc;
+    LOG_I("sys", "psc_init rc=0x%x", rc);
+    if (R_FAILED(rc)) {
+        return;
+    }
+
+    rc = threadCreate(&g_power_guard_thread, power_guard_thread_main, state, NULL, 0x4000, 0x2B, -2);
     if (R_FAILED(rc)) {
         LOG_E("sys", "threadCreate power_guard failed rc=0x%x", rc);
         return;
@@ -338,6 +424,7 @@ static void write_heartbeat(AppState *state) {
     fprintf(file, "setsys_init=0x%x\n", g_setsys_init_result);
     fprintf(file, "ts_init=0x%x\n", g_ts_init_result);
     fprintf(file, "nifm_init=0x%x\n", g_nifm_init_result);
+    fprintf(file, "psc_init=0x%x\n", g_psc_init_result);
     mutexUnlock(&state->lock);
 
     fclose(file);
@@ -360,12 +447,14 @@ int main(int argc, char **argv) {
         LOG_I("config", "Config loaded successfully");
     }
 
+    // Register with psc as early as possible, before the slow service and
+    // stream setup, so it is in place before the end-of-boot power transitions.
+    init_power_guard(&state);
     apply_startup_delay(&state.config);
     init_core_services(&state);
     init_optional_services(&state);
     app_state_refresh_device_info(&state);
     screen_stream_start(&state);
-    init_power_guard(&state);
 
     mqtt_service_start(&state);
     LOG_I("mqtt", "MQTT worker thread launched");

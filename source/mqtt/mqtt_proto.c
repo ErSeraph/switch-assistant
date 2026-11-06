@@ -369,3 +369,10 @@ bool mqtt_send_ping(int fd) {
     const unsigned char ping[2] = {0xC0, 0x00};
     return mqtt_send_packet(fd, ping, sizeof(ping));
 }
+
+// A clean DISCONNECT makes the broker discard the will message, so the retained
+// "offline" availability is not published when the console goes to sleep.
+bool mqtt_send_disconnect(int fd) {
+    const unsigned char disconnect[2] = {0xE0, 0x00};
+    return mqtt_send_packet(fd, disconnect, sizeof(disconnect));
+}
