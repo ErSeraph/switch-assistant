@@ -229,6 +229,41 @@ static void publish_if_changed(int fd, const AppConfig *config, SensorSnapshot *
     }
 }
 
+static u32 fnv1a(const char *text) {
+    u32 hash = 2166136261u;
+    for (const unsigned char *p = (const unsigned char *) text; *p; ++p) {
+        hash = (hash ^ *p) * 16777619u;
+    }
+    return hash;
+}
+
+// The sensor loop runs every second; publishing every state topic each time
+// floods the broker with retained messages that did not change.
+static void publish_topic_if_changed(int fd, SensorSnapshot *snapshot, bool force, const char *topic, const char *payload) {
+    u32 topic_hash = fnv1a(topic);
+    u32 payload_hash = fnv1a(payload);
+    int slot = -1;
+    for (int i = 0; i < snapshot->topic_cache_count; ++i) {
+        if (snapshot->topic_cache[i].topic_hash == topic_hash) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot >= 0 && !force && snapshot->initialized && snapshot->topic_cache[slot].payload_hash == payload_hash) {
+        return;
+    }
+    if (!mqtt_send_publish(fd, topic, payload, true)) {
+        return;
+    }
+    if (slot < 0 && snapshot->topic_cache_count < SENSOR_TOPIC_CACHE_SIZE) {
+        slot = snapshot->topic_cache_count++;
+        snapshot->topic_cache[slot].topic_hash = topic_hash;
+    }
+    if (slot >= 0) {
+        snapshot->topic_cache[slot].payload_hash = payload_hash;
+    }
+}
+
 void mqtt_get_system_versions(AppState *state, char *fw_ver, size_t fw_size, char *ams_ver, size_t ams_size) {
     if (fw_ver && fw_size > 0) snprintf(fw_ver, fw_size, "Unknown");
     if (ams_ver && ams_size > 0) snprintf(ams_ver, ams_size, "Unknown");
@@ -384,7 +419,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         publish_if_changed(fd, config, snapshot, force, "backlight", snapshot->backlight, sizeof(snapshot->backlight), "OFF");
         char bl_stat_top[192];
         mqtt_backlight_state_topic(config, bl_stat_top, sizeof(bl_stat_top));
-        mqtt_send_publish(fd, bl_stat_top, "OFF", true);
+        publish_topic_if_changed(fd, snapshot, force, bl_stat_top, "OFF");
     } else if (state->svc_lbl_ready && R_SUCCEEDED(svc_open(SvcId_Lbl))) {
         // lbl stays closed between reads: fatal opens its own session to show
         // an error screen and aborts if none is left.
@@ -394,7 +429,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
             publish_if_changed(fd, config, snapshot, force, "brightness", snapshot->brightness, sizeof(snapshot->brightness), value);
             char br_stat_top[192];
             mqtt_brightness_state_topic(config, br_stat_top, sizeof(br_stat_top));
-            mqtt_send_publish(fd, br_stat_top, value, true);
+            publish_topic_if_changed(fd, snapshot, force, br_stat_top, value);
         }
 
         LblBacklightSwitchStatus backlight = LblBacklightSwitchStatus_Disabled;
@@ -403,7 +438,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
             publish_if_changed(fd, config, snapshot, force, "backlight", snapshot->backlight, sizeof(snapshot->backlight), bl_val);
             char bl_stat_top[192];
             mqtt_backlight_state_topic(config, bl_stat_top, sizeof(bl_stat_top));
-            mqtt_send_publish(fd, bl_stat_top, bl_val, true);
+            publish_topic_if_changed(fd, snapshot, force, bl_stat_top, bl_val);
         }
         svc_close(SvcId_Lbl);
     }
@@ -520,13 +555,13 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         char rem_act_top[192];
         mqtt_remote_state_topic(config, remote_topic, sizeof(remote_topic));
         mqtt_remote_activity_state_topic(config, rem_act_top, sizeof(rem_act_top));
-        mqtt_send_publish(fd, remote_topic, power_sleeping ? "OFF" : "ON", true);
+        publish_topic_if_changed(fd, snapshot, force, remote_topic, power_sleeping ? "OFF" : "ON");
 
         const char *current_game_name = (strcmp(snapshot->game_running, "ON") == 0 &&
                                          snapshot->current_game_name[0] != '\0' &&
                                          strcmp(snapshot->current_game_name, "none") != 0) ?
                                          snapshot->current_game_name : "Home Menu";
-        mqtt_send_publish(fd, rem_act_top, current_game_name, true);
+        publish_topic_if_changed(fd, snapshot, force, rem_act_top, current_game_name);
     }
     {
         char mp_state_top[192];
@@ -553,7 +588,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
             mp_state = (strcmp(snapshot->game_running, "ON") == 0) ? "playing" : "idle";
         }
         if (force || !snapshot->initialized || strcmp(snapshot->mp_state, mp_state) != 0) {
-            mqtt_send_publish(fd, mp_state_top, mp_state, true);
+            publish_topic_if_changed(fd, snapshot, force, mp_state_top, mp_state);
             snprintf(snapshot->mp_state, sizeof(snapshot->mp_state), "%s", mp_state);
         }
 
@@ -566,7 +601,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         char vol_payload[16];
         snprintf(vol_payload, sizeof(vol_payload), "%.2f", vol_float);
         if (force || !snapshot->initialized || strcmp(snapshot->mp_volume, vol_payload) != 0) {
-            mqtt_send_publish(fd, mp_vol_top, vol_payload, true);
+            publish_topic_if_changed(fd, snapshot, force, mp_vol_top, vol_payload);
             snprintf(snapshot->mp_volume, sizeof(snapshot->mp_volume), "%s", vol_payload);
         }
 
@@ -599,13 +634,13 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
                 snprintf(mp_attr_json, sizeof(mp_attr_json), "{\"title_id\":\"none\",\"players_max\":0}");
             }
 
-            mqtt_send_publish(fd, mp_title_top, snapshot->current_game_name, true);
-            mqtt_send_publish(fd, mp_attr_top, mp_attr_json, true);
-            mqtt_send_publish(fd, mp_src_top, current_game_name, true);
-            mqtt_send_publish(fd, sel_game_top, current_game_name, true);
-            mqtt_send_publish(fd, sel_2p_top, current_players >= 2 ? current_game_name : "Home Menu", true);
-            mqtt_send_publish(fd, sel_4p_top, current_players >= 4 ? current_game_name : "Home Menu", true);
-            mqtt_send_publish(fd, sel_8p_top, current_players >= 8 ? current_game_name : "Home Menu", true);
+            publish_topic_if_changed(fd, snapshot, force, mp_title_top, snapshot->current_game_name);
+            publish_topic_if_changed(fd, snapshot, force, mp_attr_top, mp_attr_json);
+            publish_topic_if_changed(fd, snapshot, force, mp_src_top, current_game_name);
+            publish_topic_if_changed(fd, snapshot, force, sel_game_top, current_game_name);
+            publish_topic_if_changed(fd, snapshot, force, sel_2p_top, current_players >= 2 ? current_game_name : "Home Menu");
+            publish_topic_if_changed(fd, snapshot, force, sel_4p_top, current_players >= 4 ? current_game_name : "Home Menu");
+            publish_topic_if_changed(fd, snapshot, force, sel_8p_top, current_players >= 8 ? current_game_name : "Home Menu");
 
             snprintf(snapshot->mp_title, sizeof(snapshot->mp_title), "%s", snapshot->current_game_name);
             snprintf(snapshot->mp_source, sizeof(snapshot->mp_source), "%s", current_game_name);
@@ -623,25 +658,25 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
                 snprintf(count_str, sizeof(count_str), "%zu", count_2p);
                 mqtt_state_topic(config, "games_2p", sensor_topic, sizeof(sensor_topic));
                 mqtt_sensor_attr_topic(config, "games_2p", attr_top, sizeof(attr_top));
-                mqtt_send_publish(fd, sensor_topic, count_str, true);
+                publish_topic_if_changed(fd, snapshot, force, sensor_topic, count_str);
                 title_cache_build_json_games_attr(games_attr, 8192, 2);
-                mqtt_send_publish(fd, attr_top, games_attr, true);
+                publish_topic_if_changed(fd, snapshot, force, attr_top, games_attr);
 
                 size_t count_4p = title_cache_get_games_by_min_players(NULL, 0, 4);
                 snprintf(count_str, sizeof(count_str), "%zu", count_4p);
                 mqtt_state_topic(config, "games_4p", sensor_topic, sizeof(sensor_topic));
                 mqtt_sensor_attr_topic(config, "games_4p", attr_top, sizeof(attr_top));
-                mqtt_send_publish(fd, sensor_topic, count_str, true);
+                publish_topic_if_changed(fd, snapshot, force, sensor_topic, count_str);
                 title_cache_build_json_games_attr(games_attr, 8192, 4);
-                mqtt_send_publish(fd, attr_top, games_attr, true);
+                publish_topic_if_changed(fd, snapshot, force, attr_top, games_attr);
 
                 size_t count_8p = title_cache_get_games_by_min_players(NULL, 0, 8);
                 snprintf(count_str, sizeof(count_str), "%zu", count_8p);
                 mqtt_state_topic(config, "games_8p", sensor_topic, sizeof(sensor_topic));
                 mqtt_sensor_attr_topic(config, "games_8p", attr_top, sizeof(attr_top));
-                mqtt_send_publish(fd, sensor_topic, count_str, true);
+                publish_topic_if_changed(fd, snapshot, force, sensor_topic, count_str);
                 title_cache_build_json_games_attr(games_attr, 8192, 8);
-                mqtt_send_publish(fd, attr_top, games_attr, true);
+                publish_topic_if_changed(fd, snapshot, force, attr_top, games_attr);
 
                 snapshot->games_count_2p = (int)count_2p;
                 snapshot->games_count_4p = (int)count_4p;
@@ -681,7 +716,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         snprintf(update_payload, sizeof(update_payload),
                  "{\"installed_version\":\"%s\",\"latest_version\":\"%s\",\"title\":\"Nintendo Switch Firmware\",\"release_url\":\"https://github.com/THZoria/NX_Firmware/releases\"}",
                  safe_fw_update, safe_fw_update);
-        mqtt_send_publish(fd, update_top, update_payload, true);
+        publish_topic_if_changed(fd, snapshot, force, update_top, update_payload);
 
         char safe_ams_update[64] = "1.12.0";
         if (strcmp(ams_ver, "Unknown") != 0 && strcmp(ams_ver, fw_ver) != 0 && strncmp(ams_ver, "23.", 3) != 0) {
@@ -697,11 +732,11 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
                  "\"release_url\":\"https://github.com/Atmosphere-NX/Atmosphere/releases/latest\","
                  "\"entity_picture\":\"https://avatars.githubusercontent.com/u/39328464\"}",
                  safe_ams_update, safe_ams_update);
-        mqtt_send_publish(fd, ams_update_top, ams_payload, true);
+        publish_topic_if_changed(fd, snapshot, force, ams_update_top, ams_payload);
 
         char diag_state_top[192];
         mqtt_diagnostics_state_topic(config, diag_state_top, sizeof(diag_state_top));
-        mqtt_send_publish(fd, diag_state_top, "healthy", true);
+        publish_topic_if_changed(fd, snapshot, force, diag_state_top, "healthy");
     }
     {
         AppletOperationMode op_mode = appletGetOperationMode();

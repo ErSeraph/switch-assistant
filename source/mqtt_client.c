@@ -22,12 +22,15 @@ typedef struct {
     int socket_fd;
 } MqttContext;
 
+#define OVERLAY_POLL_INTERVAL_MS 1000
+
 static MqttContext g_ctx = {0};
 
 static void mqtt_loop(void *arg) {
     AppState *state = arg;
     u64 last_sensor_poll_ms = 0;
     u64 last_heartbeat_ms = 0;
+    u64 last_overlay_poll_ms = 0;
     app_state_push_log(state, "MQTT thread started");
 
     while (true) {
@@ -146,11 +149,10 @@ static void mqtt_loop(void *arg) {
         mqtt_brightness_cmd_topic(&config, br_cmd_topic, sizeof(br_cmd_topic));
         mqtt_backlight_cmd_topic(&config, bl_cmd_topic, sizeof(bl_cmd_topic));
         mqtt_logs_command_topic(&config, logs_cmd_topic, sizeof(logs_cmd_topic));
-        char wildcard_topic[192];
-        char safe_id[80];
-        mqtt_sanitize_id(mqtt_client_id_or_device(&config), safe_id, sizeof(safe_id));
-        snprintf(wildcard_topic, sizeof(wildcard_topic), "switch_ha/%s/#", safe_id);
-        mqtt_send_subscribe(fd, wildcard_topic);
+        // Each command topic is subscribed on its own. A switch_ha/<id>/#
+        // wildcard would also deliver every state topic this device publishes
+        // back to it (MQTT 3.1.1 has no "no local"), each one parsed and
+        // written to the SD card log, several times per second.
         if (strcmp(command_topic, dev_cmd_topic) != 0) {
             mqtt_send_subscribe(fd, command_topic);
         }
@@ -271,7 +273,12 @@ static void mqtt_loop(void *arg) {
             }
 
             u64 now = mqtt_monotonic_ms();
-            mqtt_process_overlay_commands(state, fd, &config);
+            // The overlay drops a command file on the SD card; checking for it
+            // every loop iteration (~10 times per second) is needless fs work.
+            if (now - last_overlay_poll_ms >= OVERLAY_POLL_INTERVAL_MS) {
+                mqtt_process_overlay_commands(state, fd, &config);
+                last_overlay_poll_ms = now;
+            }
             if (sensor_publish_requested || now - last_sensor_poll_ms >= SENSOR_POLL_INTERVAL_MS) {
                 mqtt_publish_switch_sensors(state, fd, &config, &sensor_snapshot, false);
                 last_sensor_poll_ms = now;

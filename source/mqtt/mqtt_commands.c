@@ -145,7 +145,9 @@ static bool start_power_action(AppState *state, PowerAction action) {
 
 static void handle_power_command(AppState *state, int fd, const AppConfig *config, PowerAction action, const char *source) {
     const char *name = power_action_name(action);
-    LOG_I("mqtt", "%s %s accepted", source, name);
+    // Warning level on purpose: every power request must leave a trace in the
+    // SD card log (the "RX publish" line just before it names the topic).
+    LOG_W("power", "%s request accepted (source: %s)", name, source);
     app_state_push_log(state, "%s %s accepted", source, name);
     if (start_power_action(state, action)) {
         mqtt_publish_cmd_status(fd, config, name, "success");
@@ -186,6 +188,7 @@ static void handle_remote_command(AppState *state, int fd, const AppConfig *conf
         }
     } else if (strcasecmp(cmd, "close_game") == 0 || strcasecmp(cmd, "close") == 0 || strcasecmp(cmd, "exit_game") == 0) {
         app_state_push_log(state, "Remote close game requested");
+        LOG_W("power", "close_game request accepted (source: Remote)");
         bool terminated = false;
         // 1. Try pmshellTerminateProgram / pmshellTerminateProcess via pm:shell
         bool pmshell_ready = false;
@@ -723,6 +726,16 @@ void mqtt_handle_publish(AppState *state, int fd, const AppConfig *config, const
         pos += 2;
     }
     if (pos > size) {
+        return;
+    }
+
+    // Brokers set RETAIN only when replaying a retained message on subscribe
+    // (MQTT 3.1.1, 3.3.1.3); live messages always arrive with it cleared. A
+    // retained command (e.g. "shutdown" published with retain by an automation)
+    // would otherwise run again on every reconnect: after a Wi-Fi drop, a
+    // wake-up or a broker restart.
+    if (buffer[0] & 0x01) {
+        LOG_W("mqtt", "Ignored retained message on '%s'", topic);
         return;
     }
 
