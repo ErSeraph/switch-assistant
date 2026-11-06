@@ -265,9 +265,10 @@ static void power_guard_thread_main(void *arg) {
 }
 
 static void init_power_guard(AppState *state) {
-    // Modules we depend on transition after us: Fs keeps the SD card usable and
-    // WlanSockets/Nifm keep the network up until MQTT has sent its DISCONNECT.
-    static const u32 dependencies[] = {PscPmModuleId_Fs, PscPmModuleId_WlanSockets, PscPmModuleId_Nifm};
+    // Fs only, like sys-con. Builds that also depended on WlanSockets and Nifm
+    // hung the console on every sleep (stuck after MinimumAwake/SleepReady,
+    // never reaching EssentialServicesSleepReady).
+    static const u32 dependencies[] = {PscPmModuleId_Fs};
 
     Result rc = smInitialize();
     if (R_SUCCEEDED(rc)) {
@@ -517,9 +518,12 @@ int main(int argc, char **argv) {
     init_optional_services(&state);
     app_state_refresh_device_info(&state);
     screen_stream_start(&state);
-    // Registered after the system services are up (the configuration verified
-    // on hardware); the modules in its dependency list must exist already.
-    init_power_guard(&state);
+    // Registered after the system services are up.
+    if (state.config.power_events_enabled) {
+        init_power_guard(&state);
+    } else {
+        LOG_W("sys", "psc disabled by config (power_events_enabled=0)");
+    }
 
     mqtt_service_start(&state);
     LOG_I("mqtt", "MQTT worker thread launched");

@@ -29,6 +29,7 @@ typedef struct {
     char device_name[64];
     int startup_delay_seconds;
     int notification_overlay_enabled;
+    int power_events_enabled;
     char mac_address[32];
 } AppConfig;
 
