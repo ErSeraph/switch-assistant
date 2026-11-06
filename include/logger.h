@@ -28,6 +28,11 @@ void logger_init(AppState *state, const char *file_path);
 void logger_set_app_state(AppState *state);
 void logger_log(LogLevel level, const char *module, const char *fmt, ...);
 void logger_log_va(LogLevel level, const char *module, const char *fmt, va_list args);
+// While suspended, log lines only go to the in-memory ring, never to the SD
+// card: an SD access in flight while fs powers the card down for sleep can
+// keep the console from completing the sleep transition. Resuming writes the
+// lines logged meanwhile (up to the ring capacity) to the file.
+void logger_set_file_suspended(bool suspended);
 
 const char *logger_level_name(LogLevel level);
 LogLevel logger_parse_level(const char *str);

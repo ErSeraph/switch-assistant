@@ -340,7 +340,12 @@ static void mqtt_loop(void *arg) {
         }
         close(fd);
         g_ctx.socket_fd = -1;
-        svc_mqtt_close_all();
+        if (!power_sleeping) {
+            svc_mqtt_close_all();
+        }
+        // On sleep/shutdown the sessions are kept: closing them means IPC to
+        // services that are going through the same power transition. They are
+        // renewed on the next connection (svc_mqtt_open_all closes first).
         mutexLock(&state->lock);
         state->mqtt_tcp_ok = false;
         state->mqtt_connected = false;

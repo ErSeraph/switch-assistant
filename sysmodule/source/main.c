@@ -231,6 +231,9 @@ static void power_guard_thread_main(void *arg) {
         u64 wait_ms = 0;
         if (is_going_down(pm_state, previous)) {
             if (!state->power_sleeping) {
+                // From here until FullAwake nothing in this process touches
+                // the SD card (see logger_set_file_suspended).
+                logger_set_file_suspended(true);
                 u64 start = monotonic_ms();
                 set_power_sleeping(state, true);
                 still_open = wait_for_sockets_closed(state);
@@ -253,6 +256,10 @@ static void power_guard_thread_main(void *arg) {
         }
         if (still_open) {
             LOG_W("power", "power: sockets close timed out (%s still open)", still_open);
+        }
+        if (event && strcmp(event, "awake") == 0) {
+            // fs is fully awake again: write the lines kept in memory.
+            logger_set_file_suspended(false);
         }
     }
 }
@@ -518,6 +525,15 @@ int main(int argc, char **argv) {
     LOG_I("mqtt", "MQTT worker thread launched");
 
     while (true) {
+        mutexLock(&state.lock);
+        bool sleeping_now = state.power_sleeping;
+        mutexUnlock(&state.lock);
+        if (sleeping_now) {
+            // No SD card access while the console goes to sleep or sleeps.
+            svcSleepThread(1000ULL * 1000ULL * 1000ULL);
+            continue;
+        }
+
         AppConfig loaded;
         if (config_load(&loaded)) {
             mutexLock(&state.lock);
