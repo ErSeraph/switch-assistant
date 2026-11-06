@@ -16,8 +16,10 @@
 #define OPTIONAL_INIT_TIMEOUT_NS (1500ULL * 1000ULL * 1000ULL)
 #define RESULT_OPTIONAL_TIMEOUT MAKERESULT(Module_Libnx, LibnxError_Timeout)
 #define RESULT_NOT_INITIALIZED MAKERESULT(Module_Libnx, LibnxError_NotInitialized)
-// Far outside the ids used by the system (Nintendo keeps adding ids below 128).
-#define SHA_PSC_MODULE_ID ((PscPmModuleId) 0x5348)
+// psc only dispatches to ids in the system range (up to 127, Spsm): with
+// 0x5348 the module registered fine but never received a single request.
+// 120 is unused by the system (sys-con uses 126) and was verified on hardware.
+#define SHA_PSC_MODULE_ID ((PscPmModuleId) 120)
 #define SLEEP_SOCKETS_TIMEOUT_MS 3000
 
 static Result g_socket_init_result = RESULT_NOT_INITIALIZED;
@@ -211,8 +213,9 @@ static void power_guard_thread_main(void *arg) {
                 break;
         }
 
-        pscPmModuleAcknowledge(&g_psc_module, pm_state);
+        Result ack_rc = pscPmModuleAcknowledge(&g_psc_module, pm_state);
 
+        LOG_I("power", "psc state=%d flags=0x%x ack=0x%x", (int) pm_state, flags, ack_rc);
         if (event) {
             LOG_I("power", "power: %s", event);
         }
@@ -223,9 +226,9 @@ static void power_guard_thread_main(void *arg) {
 }
 
 static void init_power_guard(AppState *state) {
-    // Only Fs: depending on modules that may not be registered (WlanSockets, Nifm)
-    // breaks psc dispatch and makes psc abort on the next transition.
-    static const u32 dependencies[] = {PscPmModuleId_Fs};
+    // Modules we depend on transition after us: Fs keeps the SD card usable and
+    // WlanSockets/Nifm keep the network up until MQTT has sent its DISCONNECT.
+    static const u32 dependencies[] = {PscPmModuleId_Fs, PscPmModuleId_WlanSockets, PscPmModuleId_Nifm};
 
     Result rc = smInitialize();
     if (R_SUCCEEDED(rc)) {
@@ -470,14 +473,14 @@ int main(int argc, char **argv) {
         LOG_I("config", "Config loaded successfully");
     }
 
-    // Register with psc as early as possible, before the slow service and
-    // stream setup, so it is in place before the end-of-boot power transitions.
-    init_power_guard(&state);
     apply_startup_delay(&state.config);
     init_core_services(&state);
     init_optional_services(&state);
     app_state_refresh_device_info(&state);
     screen_stream_start(&state);
+    // Registered after the system services are up (the configuration verified
+    // on hardware); the modules in its dependency list must exist already.
+    init_power_guard(&state);
 
     mqtt_service_start(&state);
     LOG_I("mqtt", "MQTT worker thread launched");
