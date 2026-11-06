@@ -97,6 +97,15 @@ static void publish_discovery_sensor_ext(AppState *state, int fd, const AppConfi
             snprintf(payload + strlen(payload), sizeof(payload) - strlen(payload), ",\"stat_cla\":\"%s\"}", state_class);
         }
     }
+    if (device_class && strcmp(device_class, "data_size") == 0) {
+        // Sizes are whole MB; without this Home Assistant shows them with
+        // the data_size default of two decimals.
+        size_t len = strlen(payload);
+        if (len > 0 && payload[len - 1] == '}') {
+            payload[len - 1] = '\0';
+            snprintf(payload + strlen(payload), sizeof(payload) - strlen(payload), ",\"suggested_display_precision\":0}");
+        }
+    }
     if (entity_category) {
         size_t len = strlen(payload);
         if (len > 0 && payload[len - 1] == '}') {

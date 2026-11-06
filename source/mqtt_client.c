@@ -174,6 +174,9 @@ static void mqtt_loop(void *arg) {
         // wildcard would also deliver every state topic this device publishes
         // back to it (MQTT 3.1.1 has no "no local"), each one parsed and
         // written to the SD card log, several times per second.
+        // switch_ha/<id>/command carries the buttons (reboot, shutdown, sleep,
+        // close game, ...); it used to be covered only by a wildcard.
+        mqtt_send_subscribe(fd, dev_cmd_topic);
         if (strcmp(command_topic, dev_cmd_topic) != 0) {
             mqtt_send_subscribe(fd, command_topic);
         }
