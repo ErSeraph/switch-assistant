@@ -193,7 +193,7 @@ static void handle_remote_command(AppState *state, int fd, const AppConfig *conf
             pmshell_ready = true;
         }
 
-        if (state->svc_pminfo_ready) {
+        if (svc_mqtt_is_open(SvcId_Pminfo)) {
             u64 process_ids[96];
             s32 process_count = 0;
             if (R_SUCCEEDED(svcGetProcessList(&process_count, process_ids, 96))) {
@@ -240,7 +240,7 @@ static void handle_remote_command(AppState *state, int fd, const AppConfig *conf
         state->sensor_publish_requested = true;
         mutexUnlock(&state->lock);
     } else if (strcasecmp(cmd, "volume_up") == 0) {
-        if (state->svc_audctl_ready) {
+        if (svc_mqtt_is_open(SvcId_Audctl)) {
             AudioTarget audio_target = AudioTarget_Invalid;
             if (R_SUCCEEDED(audctlGetActiveOutputTarget(&audio_target)) || R_SUCCEEDED(audctlGetDefaultTarget(&audio_target))) {
                 s32 vol = 0, min_v = 0, max_v = 0;
@@ -259,7 +259,7 @@ static void handle_remote_command(AppState *state, int fd, const AppConfig *conf
             }
         }
     } else if (strcasecmp(cmd, "volume_down") == 0) {
-        if (state->svc_audctl_ready) {
+        if (svc_mqtt_is_open(SvcId_Audctl)) {
             AudioTarget audio_target = AudioTarget_Invalid;
             if (R_SUCCEEDED(audctlGetActiveOutputTarget(&audio_target)) || R_SUCCEEDED(audctlGetDefaultTarget(&audio_target))) {
                 s32 vol = 0, min_v = 0, max_v = 0;
@@ -278,7 +278,7 @@ static void handle_remote_command(AppState *state, int fd, const AppConfig *conf
             }
         }
     } else if (strcasecmp(cmd, "volume_mute") == 0 || strcasecmp(cmd, "mute") == 0) {
-        if (state->svc_audctl_ready) {
+        if (svc_mqtt_is_open(SvcId_Audctl)) {
             AudioTarget audio_target = AudioTarget_Invalid;
             if (R_SUCCEEDED(audctlGetActiveOutputTarget(&audio_target)) || R_SUCCEEDED(audctlGetDefaultTarget(&audio_target))) {
                 s32 min_v = 0;
@@ -402,7 +402,7 @@ static void handle_media_player_volume_set(AppState *state, int fd, const AppCon
     double frac = atof(payload);
     if (frac < 0.0) frac = 0.0;
     if (frac > 1.0) frac = 1.0;
-    if (state->svc_audctl_ready) {
+    if (svc_mqtt_is_open(SvcId_Audctl)) {
         AudioTarget audio_target = AudioTarget_Invalid;
         if (R_SUCCEEDED(audctlGetActiveOutputTarget(&audio_target)) || R_SUCCEEDED(audctlGetDefaultTarget(&audio_target))) {
             s32 min_v = 0, max_v = 0;

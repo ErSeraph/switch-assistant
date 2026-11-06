@@ -71,15 +71,7 @@ void __appExit(void) {
         pscPmModuleClose(&g_psc_module);
         pscmExit();
     }
-    if (R_SUCCEEDED(g_nifm_init_result)) nifmExit();
-    if (R_SUCCEEDED(g_ts_init_result)) tsExit();
-    if (R_SUCCEEDED(g_setsys_init_result)) setsysExit();
-    if (R_SUCCEEDED(g_pminfo_init_result)) pminfoExit();
-    if (R_SUCCEEDED(g_audctl_init_result)) audctlExit();
-    if (R_SUCCEEDED(g_hid_init_result)) hidExit();
     screen_stream_stop();
-    if (R_SUCCEEDED(g_spl_init_result)) splExit();
-    if (R_SUCCEEDED(g_psm_init_result)) psmExit();
     if (R_SUCCEEDED(g_socket_init_result)) socketExit();
     fsdevUnmountAll();
     fsExit();
@@ -107,8 +99,11 @@ static void init_core_services(AppState *state) {
     g_socket_init_result = socketInitialize(&socket_config);
     LOG_I("sys", "socketInitialize rc=0x%x", g_socket_init_result);
 
+    // psm is opened again for each MQTT connection (svc_session).
     g_psm_init_result = psmInitialize();
-    LOG_I("sys", "psmInitialize rc=0x%x", g_psm_init_result);
+    if (R_SUCCEEDED(g_psm_init_result)) psmExit();
+    state->svc_psm_ready = R_SUCCEEDED(g_psm_init_result);
+    LOG_I("sys", "psm probe rc=0x%x", g_psm_init_result);
 
     // Only probe spsm: keeping a session open exhausts its session limit and
     // makes fatal/am abort on reboot (OutOfSessions, 0x615). It is opened
@@ -118,9 +113,11 @@ static void init_core_services(AppState *state) {
     state->svc_spsm_ready = R_SUCCEEDED(g_spsm_init_result);
     LOG_I("sys", "spsm probe rc=0x%x", g_spsm_init_result);
 
+    // spl is opened again only to read the Atmosphere version (svc_session).
     g_spl_init_result = splInitialize();
+    if (R_SUCCEEDED(g_spl_init_result)) splExit();
     state->svc_spl_ready = R_SUCCEEDED(g_spl_init_result);
-    LOG_I("sys", "splInitialize rc=0x%x", g_spl_init_result);
+    LOG_I("sys", "spl probe rc=0x%x", g_spl_init_result);
 
     LOG_I("sys", "Core service init completed");
 }
@@ -272,37 +269,46 @@ typedef struct {
     Result rc;
 } OptionalInitTask;
 
+// Every optional service is only probed: the session is closed in this thread,
+// so it is released even if the probe finishes after the timeout. Sessions are
+// opened again where they are used (see svc_session.h for the lifetimes).
 static void optional_init_thread(void *arg) {
     OptionalInitTask *task = arg;
     Result rc = MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
     switch (task->service) {
         case OptionalService_Hid:
             rc = hidInitialize();
+            if (R_SUCCEEDED(rc)) hidExit();
             break;
         case OptionalService_Lbl:
-            // Probe only, closed here so it is released even if the probe
-            // finishes after the timeout. fatal opens its own lbl session to
-            // show an error screen and aborts if none is left.
+            // fatal opens its own lbl session to show an error screen and
+            // aborts if none is left.
             rc = lblInitialize();
             if (R_SUCCEEDED(rc)) lblExit();
             break;
         case OptionalService_Audctl:
             rc = audctlInitialize();
+            if (R_SUCCEEDED(rc)) audctlExit();
             break;
         case OptionalService_Pminfo:
             rc = pminfoInitialize();
+            if (R_SUCCEEDED(rc)) pminfoExit();
             break;
         case OptionalService_Setsys:
             rc = setsysInitialize();
+            if (R_SUCCEEDED(rc)) setsysExit();
             break;
         case OptionalService_Spl:
             rc = splInitialize();
+            if (R_SUCCEEDED(rc)) splExit();
             break;
         case OptionalService_Ts:
             rc = tsInitialize();
+            if (R_SUCCEEDED(rc)) tsExit();
             break;
         case OptionalService_Nifm:
             rc = nifmInitialize(NifmServiceType_System);
+            if (R_SUCCEEDED(rc)) nifmExit();
             break;
     }
     task->rc = rc;

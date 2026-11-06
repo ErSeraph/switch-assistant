@@ -193,7 +193,7 @@ static bool scan_process_list_for_known_game(AppState *state, u64 *pid_out, u64 
 }
 
 static bool current_game(AppState *state, u64 *application_id, char *name, size_t name_size) {
-    if (!state->svc_pminfo_ready) {
+    if (!svc_mqtt_is_open(SvcId_Pminfo)) {
         set_game_status(state, "pminfo unavailable");
         return false;
     }
@@ -233,17 +233,12 @@ void mqtt_get_system_versions(AppState *state, char *fw_ver, size_t fw_size, cha
     if (fw_ver && fw_size > 0) snprintf(fw_ver, fw_size, "Unknown");
     if (ams_ver && ams_size > 0) snprintf(ams_ver, ams_size, "Unknown");
 
-    bool setsys_needed_close = false;
-    if (!state || !state->svc_setsys_ready) {
-        if (R_SUCCEEDED(setsysInitialize())) {
-            setsys_needed_close = true;
-            if (state) state->svc_setsys_ready = true;
-        }
-    }
+    // setsys and spl are opened only for this read (svc_session.h).
+    bool setsys_open = R_SUCCEEDED(svc_open(SvcId_Setsys));
 
     SetSysFirmwareVersion fw;
     memset(&fw, 0, sizeof(fw));
-    if (R_SUCCEEDED(setsysGetFirmwareVersion(&fw))) {
+    if (setsys_open && R_SUCCEEDED(setsysGetFirmwareVersion(&fw))) {
         if (fw.display_version[0] != '\0') {
             // Extract base firmware version only (before '|' or ' ' or '(' separators)
             const char *pipe = strchr(fw.display_version, '|');
@@ -276,23 +271,14 @@ void mqtt_get_system_versions(AppState *state, char *fw_ver, size_t fw_size, cha
         }
     }
 
-    if (setsys_needed_close && (!state || !state->svc_setsys_ready)) {
-        setsysExit();
+    if (setsys_open) {
+        svc_close(SvcId_Setsys);
     }
 
     // Always query Exosphere/SPL first — this is the ONLY reliable AMS version source
     // on modern firmware (23.x+). AMS does NOT embed its version in display_version.
     if (ams_ver && ams_size > 0) {
-        bool spl_init_local = false;
-        bool spl_ready = (state && state->svc_spl_ready);
-        if (!spl_ready) {
-            if (R_SUCCEEDED(splInitialize())) {
-                spl_init_local = true;
-                spl_ready = true;
-                if (state) state->svc_spl_ready = true;
-            }
-        }
-        if (spl_ready) {
+        if (R_SUCCEEDED(svc_open(SvcId_Spl))) {
             u64 exosphere_ver = 0;
             // Item 65000 = CONFIGITEM_EXOSPHERE_VERSION
             if (R_SUCCEEDED(splGetConfig((SplConfigItem) 65000, &exosphere_ver)) && exosphere_ver > 0) {
@@ -314,10 +300,7 @@ void mqtt_get_system_versions(AppState *state, char *fw_ver, size_t fw_size, cha
                     snprintf(ams_ver, ams_size, "%u.%u.%u", maj1, min1, mic1);
                 }
             }
-            if (spl_init_local && (!state || state->app_mode != AppMode_Sysmodule)) {
-                splExit();
-                if (state) state->svc_spl_ready = false;
-            }
+            svc_close(SvcId_Spl);
         }
 
         // Last-resort: parse AMS string from display_version (older firmware embedded it)
@@ -363,15 +346,16 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
     mutexLock(&state->lock);
     bool power_sleeping = state->power_sleeping;
     mutexUnlock(&state->lock);
+    bool psm_open = svc_mqtt_is_open(SvcId_Psm);
 
-    if (R_SUCCEEDED(psmGetBatteryChargePercentage(&percent))) {
+    if (psm_open && R_SUCCEEDED(psmGetBatteryChargePercentage(&percent))) {
         snprintf(value, sizeof(value), "%u", percent);
         publish_if_changed(fd, config, snapshot, force, "battery", snapshot->battery, sizeof(snapshot->battery), value);
     } else if (force) {
         publish_if_changed(fd, config, snapshot, force, "battery", snapshot->battery, sizeof(snapshot->battery), "0");
     }
 
-    if (R_SUCCEEDED(psmGetChargerType(&charger))) {
+    if (psm_open && R_SUCCEEDED(psmGetChargerType(&charger))) {
         publish_if_changed(fd, config, snapshot, force, "charging", snapshot->charging, sizeof(snapshot->charging),
                            charger == PsmChargerType_Unconnected ? "OFF" : "ON");
         publish_if_changed(fd, config, snapshot, force, "charger_type", snapshot->charger_type, sizeof(snapshot->charger_type),
@@ -381,7 +365,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         publish_if_changed(fd, config, snapshot, force, "charger_type", snapshot->charger_type, sizeof(snapshot->charger_type), "unknown");
     }
 
-    if (R_SUCCEEDED(psmGetBatteryChargeInfoFields(&info))) {
+    if (psm_open && R_SUCCEEDED(psmGetBatteryChargeInfoFields(&info))) {
         snprintf(value, sizeof(value), "%u", info.battery_charge_milli_voltage);
         publish_if_changed(fd, config, snapshot, force, "battery_voltage", snapshot->battery_voltage, sizeof(snapshot->battery_voltage), value);
 
@@ -424,7 +408,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         svc_close(SvcId_Lbl);
     }
 
-    if (state->svc_audctl_ready) {
+    if (svc_mqtt_is_open(SvcId_Audctl)) {
         AudioTarget audio_target = AudioTarget_Invalid;
         if (R_SUCCEEDED(audctlGetActiveOutputTarget(&audio_target)) || R_SUCCEEDED(audctlGetDefaultTarget(&audio_target))) {
             publish_if_changed(fd, config, snapshot, force, "audio_target", snapshot->audio_target, sizeof(snapshot->audio_target),
@@ -473,7 +457,8 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         HidNpadIdType_No1, HidNpadIdType_No2, HidNpadIdType_No3, HidNpadIdType_No4,
         HidNpadIdType_No5, HidNpadIdType_No6, HidNpadIdType_No7, HidNpadIdType_No8
     };
-    if (state->svc_hid_ready) {
+    // hid reads abort the process when hid is not open: keep them in this block.
+    if (svc_mqtt_is_open(SvcId_Hid)) {
         int player_controller_count = 0;
         char player_values[MAX_PLAYERS][32];
         char player_wired_values[MAX_PLAYERS][8];
@@ -724,7 +709,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         publish_if_changed(fd, config, snapshot, force, "docked", snapshot->docked, sizeof(snapshot->docked),
                            is_docked ? "ON" : "OFF");
     }
-    if (state->svc_ts_ready) {
+    if (svc_mqtt_is_open(SvcId_Ts)) {
         s32 soc_temp = 0;
         if (R_SUCCEEDED(tsGetTemperature(TsLocation_Internal, &soc_temp))) {
             snprintf(value, sizeof(value), "%.1f", (double) soc_temp / 1000.0);
@@ -736,7 +721,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         snprintf(value, sizeof(value), "%llu", (unsigned long long) uptime_s);
         publish_if_changed(fd, config, snapshot, force, "uptime", snapshot->uptime, sizeof(snapshot->uptime), value);
     }
-    if (state->svc_nifm_ready) {
+    if (svc_mqtt_is_open(SvcId_Nifm)) {
         u32 rssi = 0;
         if (R_SUCCEEDED(nifmGetInternetConnectionStatus(NULL, &rssi, NULL))) {
             snprintf(value, sizeof(value), "%u", rssi);

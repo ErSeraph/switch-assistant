@@ -44,6 +44,7 @@ typedef struct {
     bool config_dirty;
     bool restart_required;
     bool svc_hid_ready;
+    bool svc_psm_ready;
     bool svc_lbl_ready;
     bool svc_audctl_ready;
     bool svc_spsm_ready;

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "mqtt/mqtt_state.h"
+#include "svc_session.h"
 
 void app_state_init(AppState *state) {
     memset(state, 0, sizeof(*state));
@@ -39,14 +40,8 @@ void app_state_refresh_device_info(AppState *state) {
         if (state->config.mac_address[0] != '\0') {
             snprintf(state->cached_mac, sizeof(state->cached_mac), "%s", state->config.mac_address);
         } else {
-            bool setsys_local = false;
-            if (!state->svc_setsys_ready) {
-                if (R_SUCCEEDED(setsysInitialize())) {
-                    setsys_local = true;
-                    state->svc_setsys_ready = true;
-                }
-            }
-            if (state->svc_setsys_ready) {
+            // setsys is opened only for this read (svc_session.h).
+            if (R_SUCCEEDED(svc_open(SvcId_Setsys))) {
                 SetSysSerialNumber serial = {0};
                 if (R_SUCCEEDED(setsysGetSerialNumber(&serial)) && serial.number[0] != '\0') {
                     // Derive a stable 6-byte identifier from serial number chars
@@ -59,9 +54,7 @@ void app_state_refresh_device_info(AppState *state) {
                              "%02x:%02x:%02x:%02x:%02x:%02x",
                              b[0], b[1], b[2], b[3], b[4], b[5]);
                 }
-            }
-            if (setsys_local && !state->svc_setsys_ready) {
-                setsysExit();
+                svc_close(SvcId_Setsys);
             }
         }
     }

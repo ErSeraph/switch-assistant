@@ -4,6 +4,7 @@
 #include "mqtt/mqtt_discovery.h"
 #include "mqtt/mqtt_state.h"
 #include "mqtt/mqtt_commands.h"
+#include "svc_session.h"
 
 #include <switch.h>
 
@@ -182,6 +183,8 @@ static void mqtt_loop(void *arg) {
         mutexUnlock(&state->lock);
         app_state_push_log(state, "MQTT connected");
         app_state_set_status(state, "MQTT connected");
+        // Sessions read by the sensor loop live as long as this connection.
+        svc_mqtt_open_all(state);
 
         char avail_topic[192];
         mqtt_availability_topic(&config, avail_topic, sizeof(avail_topic));
@@ -299,6 +302,7 @@ static void mqtt_loop(void *arg) {
         }
         close(fd);
         g_ctx.socket_fd = -1;
+        svc_mqtt_close_all();
         mutexLock(&state->lock);
         state->mqtt_tcp_ok = false;
         state->mqtt_connected = false;

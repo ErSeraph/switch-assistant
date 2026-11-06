@@ -2,6 +2,7 @@
 #include "mqtt/mqtt_state.h"
 #include "mqtt/mqtt_topics.h"
 #include "title_cache.h"
+#include "svc_session.h"
 
 #include <switch.h>
 #include <switch/services/applet.h>
@@ -214,19 +215,22 @@ size_t logger_dump_diagnostics_json(AppState *state, const AppConfig *config, ch
     const char *mac_str = (state && state->cached_mac[0] != '\0') ? state->cached_mac : "00:00:00:00:00:00";
 
     u32 rssi = 0;
-    if (state && state->svc_nifm_ready) {
+    // Runs on the MQTT thread: these sessions are open while MQTT is connected.
+    if (svc_mqtt_is_open(SvcId_Nifm)) {
         nifmGetInternetConnectionStatus(NULL, &rssi, NULL);
     }
 
     u32 battery_pct = 0;
     PsmChargerType charger = PsmChargerType_Unconnected;
     PsmBatteryChargeInfoFields batt_info = {0};
-    if (R_SUCCEEDED(psmGetBatteryChargePercentage(&battery_pct))) {}
-    if (R_SUCCEEDED(psmGetChargerType(&charger))) {}
-    if (R_SUCCEEDED(psmGetBatteryChargeInfoFields(&batt_info))) {}
+    if (svc_mqtt_is_open(SvcId_Psm)) {
+        psmGetBatteryChargePercentage(&battery_pct);
+        psmGetChargerType(&charger);
+        psmGetBatteryChargeInfoFields(&batt_info);
+    }
 
     s32 soc_temp = 0;
-    if (state && state->svc_ts_ready) {
+    if (svc_mqtt_is_open(SvcId_Ts)) {
         tsGetTemperature(TsLocation_Internal, &soc_temp);
     }
 
