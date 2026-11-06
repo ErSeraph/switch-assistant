@@ -2,6 +2,7 @@
 #include "mqtt/mqtt_proto.h"
 #include "mqtt/mqtt_topics.h"
 #include "screen_stream.h"
+#include "svc_session.h"
 #include "title_cache.h"
 
 #include <switch.h>
@@ -400,7 +401,9 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         char bl_stat_top[192];
         mqtt_backlight_state_topic(config, bl_stat_top, sizeof(bl_stat_top));
         mqtt_send_publish(fd, bl_stat_top, "OFF", true);
-    } else if (state->svc_lbl_ready) {
+    } else if (state->svc_lbl_ready && R_SUCCEEDED(svc_open(SvcId_Lbl))) {
+        // lbl stays closed between reads: fatal opens its own session to show
+        // an error screen and aborts if none is left.
         float brightness = 0.0f;
         if (R_SUCCEEDED(lblGetCurrentBrightnessSetting(&brightness)) || R_SUCCEEDED(lblGetBrightnessSettingAppliedToBacklight(&brightness))) {
             snprintf(value, sizeof(value), "%.0f", (double) (brightness * 100.0f));
@@ -418,6 +421,7 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
             mqtt_backlight_state_topic(config, bl_stat_top, sizeof(bl_stat_top));
             mqtt_send_publish(fd, bl_stat_top, bl_val, true);
         }
+        svc_close(SvcId_Lbl);
     }
 
     if (state->svc_audctl_ready) {

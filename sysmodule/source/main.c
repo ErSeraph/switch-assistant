@@ -3,6 +3,7 @@
 #include "logger.h"
 #include "mqtt_client.h"
 #include "screen_stream.h"
+#include "svc_session.h"
 
 #include <switch.h>
 #include <stdio.h>
@@ -65,11 +66,9 @@ void __appExit(void) {
     if (R_SUCCEEDED(g_setsys_init_result)) setsysExit();
     if (R_SUCCEEDED(g_pminfo_init_result)) pminfoExit();
     if (R_SUCCEEDED(g_audctl_init_result)) audctlExit();
-    if (R_SUCCEEDED(g_lbl_init_result)) lblExit();
     if (R_SUCCEEDED(g_hid_init_result)) hidExit();
     screen_stream_stop();
     if (R_SUCCEEDED(g_spl_init_result)) splExit();
-    if (R_SUCCEEDED(g_spsm_init_result)) spsmExit();
     if (R_SUCCEEDED(g_psm_init_result)) psmExit();
     if (R_SUCCEEDED(g_socket_init_result)) socketExit();
     fsdevUnmountAll();
@@ -101,9 +100,13 @@ static void init_core_services(AppState *state) {
     g_psm_init_result = psmInitialize();
     LOG_I("sys", "psmInitialize rc=0x%x", g_psm_init_result);
 
+    // Only probe spsm: keeping a session open exhausts its session limit and
+    // makes fatal/am abort on reboot (OutOfSessions, 0x615). It is opened
+    // again for each reboot/shutdown/sleep request (svc_session).
     g_spsm_init_result = spsmInitialize();
+    if (R_SUCCEEDED(g_spsm_init_result)) spsmExit();
     state->svc_spsm_ready = R_SUCCEEDED(g_spsm_init_result);
-    LOG_I("sys", "spsmInitialize rc=0x%x", g_spsm_init_result);
+    LOG_I("sys", "spsm probe rc=0x%x", g_spsm_init_result);
 
     g_spl_init_result = splInitialize();
     state->svc_spl_ready = R_SUCCEEDED(g_spl_init_result);
@@ -123,12 +126,13 @@ static void power_guard_thread_main(void *arg) {
         // all entities as unavailable.
         // We only use backlight status to pause RTSP screen streaming if screen is off in handheld.
         bool screen_off = false;
-        if (state->svc_lbl_ready) {
+        if (state->svc_lbl_ready && R_SUCCEEDED(svc_open(SvcId_Lbl))) {
             LblBacklightSwitchStatus backlight = LblBacklightSwitchStatus_Enabled;
             if (R_SUCCEEDED(lblGetBacklightSwitchStatus(&backlight))) {
                 screen_off = (backlight == LblBacklightSwitchStatus_Disabled ||
                               backlight == LblBacklightSwitchStatus_Disabling);
             }
+            svc_close(SvcId_Lbl);
         }
 
         if (screen_off != last_sleeping) {
@@ -190,7 +194,11 @@ static void optional_init_thread(void *arg) {
             rc = hidInitialize();
             break;
         case OptionalService_Lbl:
+            // Probe only, closed here so it is released even if the probe
+            // finishes after the timeout. fatal opens its own lbl session to
+            // show an error screen and aborts if none is left.
             rc = lblInitialize();
+            if (R_SUCCEEDED(rc)) lblExit();
             break;
         case OptionalService_Audctl:
             rc = audctlInitialize();

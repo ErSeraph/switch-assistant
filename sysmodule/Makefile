@@ -36,7 +36,7 @@ export APP_JSON := $(CURDIR)/$(CONFIG_JSON)
 export DEPSDIR := $(CURDIR)/$(BUILD)
 
 export VPATH := $(CURDIR)/source $(CURDIR)/../source $(CURDIR)/../source/mqtt
-export OFILES := main.o app_state.o config.o logger.o mqtt_client.o mqtt_proto.o mqtt_topics.o mqtt_notify.o mqtt_discovery.o mqtt_state.o mqtt_commands.o title_cache.o screen_stream.o
+export OFILES := main.o app_state.o config.o logger.o mqtt_client.o mqtt_proto.o mqtt_topics.o mqtt_notify.o mqtt_discovery.o mqtt_state.o mqtt_commands.o title_cache.o screen_stream.o svc_session.o
 
 export INCLUDE := -I$(CURDIR)/../include \
 	-I$(CURDIR)/../include/mqtt \
