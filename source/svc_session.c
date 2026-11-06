@@ -84,13 +84,18 @@ static void svc_mqtt_open_one(SvcId id, bool available) {
     }
 }
 
-void svc_mqtt_open_all(const AppState *state) {
+void svc_mqtt_open_all(AppState *state) {
     svc_mqtt_close_all();
     svc_mqtt_open_one(SvcId_Psm, state->svc_psm_ready);
     svc_mqtt_open_one(SvcId_Audctl, state->svc_audctl_ready);
     svc_mqtt_open_one(SvcId_Pminfo, state->svc_pminfo_ready);
     svc_mqtt_open_one(SvcId_Hid, state->svc_hid_ready);
-    svc_mqtt_open_one(SvcId_Nifm, state->svc_nifm_ready);
+    svc_mqtt_open_one(SvcId_Nifm, true);
+    if (svc_mqtt_is_open(SvcId_Nifm) && !state->svc_nifm_ready) {
+        mutexLock(&state->lock);
+        state->svc_nifm_ready = true;
+        mutexUnlock(&state->lock);
+    }
     // tsGetTemperature returns IncompatSysVer on 17.0.0+, so ts would only cost IPC there.
     svc_mqtt_open_one(SvcId_Ts, state->svc_ts_ready && hosversionBefore(17, 0, 0));
 }

@@ -55,5 +55,8 @@ typedef struct {
 } SensorSnapshot;
 
 void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *config, SensorSnapshot *snapshot, bool force);
+// Minimal "console is off" states published right before disconnecting for
+// sleep/shutdown: no service calls, only a few small publishes.
+void mqtt_publish_sleep_states(int fd, const AppConfig *config);
 void mqtt_publish_state(AppState *state, int fd, const AppConfig *config, const char *status);
 void mqtt_get_system_versions(AppState *state, char *fw_ver, size_t fw_size, char *ams_ver, size_t ams_size);

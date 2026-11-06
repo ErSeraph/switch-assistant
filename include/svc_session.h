@@ -46,7 +46,9 @@ void svc_close(SvcId id);
 
 // Per MQTT connection. Called from the MQTT thread only. Only services whose
 // boot probe succeeded are opened, so a service that is not registered cannot
-// block the MQTT thread.
-void svc_mqtt_open_all(const AppState *state);
+// block the MQTT thread. nifm is the exception: it always exists but is often
+// too slow to answer the boot probe, so it is tried again here and marked
+// available when it opens (this runs before discovery is published).
+void svc_mqtt_open_all(AppState *state);
 void svc_mqtt_close_all(void);
 bool svc_mqtt_is_open(SvcId id);

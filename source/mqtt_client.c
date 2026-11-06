@@ -296,6 +296,16 @@ static void mqtt_loop(void *arg) {
                 break;
             }
 
+            if (power_sleeping) {
+                // Sleep/shutdown: psc is waiting for this socket to close and
+                // the network goes down soon. Only the few "off" states, then
+                // a clean DISCONNECT so the broker does not fire the
+                // "offline" will: Home Assistant shows the console as off.
+                mqtt_publish_sleep_states(fd, &config);
+                mqtt_send_disconnect(fd);
+                break;
+            }
+
             u64 now = mqtt_monotonic_ms();
             // The overlay drops a command file on the SD card; checking for it
             // every loop iteration (~10 times per second) is needless fs work.
@@ -312,15 +322,6 @@ static void mqtt_loop(void *arg) {
                 }
                 mqtt_publish_switch_sensors(state, fd, &config, &sensor_snapshot, false);
                 last_sensor_poll_ms = now;
-            }
-
-            if (power_sleeping) {
-                // The sensor publish above already sent the sleeping states
-                // (media player "off", remote "OFF", backlight "OFF"). A clean
-                // DISCONNECT keeps the broker from firing the "offline" will, so
-                // Home Assistant shows the console as off, not unavailable.
-                mqtt_send_disconnect(fd);
-                break;
             }
 
             if (now - last_heartbeat_ms >= MQTT_HEARTBEAT_INTERVAL_MS) {
@@ -350,6 +351,15 @@ static void mqtt_loop(void *arg) {
             app_state_push_log(state, "MQTT disconnected");
         }
         svcSleepThread(1000ULL * 1000ULL * 1000ULL);
+    }
+}
+
+void mqtt_service_abort_socket(void) {
+    int fd = g_ctx.socket_fd;
+    if (fd >= 0) {
+        // Unblocks a send()/poll() stuck on a network that is going down; the
+        // MQTT thread then closes the socket itself.
+        shutdown(fd, SHUT_RDWR);
     }
 }
 

@@ -21,6 +21,7 @@
 // 120 is unused by the system (sys-con uses 126) and was verified on hardware.
 #define SHA_PSC_MODULE_ID ((PscPmModuleId) 120)
 #define SLEEP_SOCKETS_TIMEOUT_MS 3000
+#define SLEEP_SOCKETS_FORCE_MS 1500
 
 static Result g_socket_init_result = RESULT_NOT_INITIALIZED;
 static Result g_psm_init_result = RESULT_NOT_INITIALIZED;
@@ -152,18 +153,48 @@ static void set_power_sleeping(AppState *state, bool sleeping) {
 // (omm then aborts with a psc error), so both MQTT and RTSP must be closed
 // before the request is acknowledged. The MQTT thread sees power_sleeping,
 // publishes the "off" states, disconnects cleanly and closes its socket.
-static bool wait_for_sockets_closed(AppState *state) {
-    u64 deadline = monotonic_ms() + SLEEP_SOCKETS_TIMEOUT_MS;
-    while (monotonic_ms() < deadline) {
-        mutexLock(&state->lock);
-        bool connected = state->mqtt_connected;
-        mutexUnlock(&state->lock);
-        if (!connected && mqtt_service_socket_idle() && screen_stream_sockets_closed()) {
-            return true;
+static bool sockets_closed_now(AppState *state) {
+    mutexLock(&state->lock);
+    bool connected = state->mqtt_connected;
+    mutexUnlock(&state->lock);
+    return !connected && mqtt_service_socket_idle() && screen_stream_sockets_closed();
+}
+
+// Returns a short description of what was still open, or NULL when all closed.
+static const char *wait_for_sockets_closed(AppState *state) {
+    u64 start = monotonic_ms();
+    bool forced = false;
+    while (monotonic_ms() - start < SLEEP_SOCKETS_TIMEOUT_MS) {
+        if (sockets_closed_now(state)) {
+            return NULL;
+        }
+        if (!forced && monotonic_ms() - start >= SLEEP_SOCKETS_FORCE_MS) {
+            // A send()/poll() blocked on a network that is going down would
+            // keep its socket open past psc's deadline: force them to fail.
+            mqtt_service_abort_socket();
+            screen_stream_close_sockets();
+            forced = true;
         }
         svcSleepThread(50ULL * 1000ULL * 1000ULL);
     }
-    return false;
+    if (!mqtt_service_socket_idle()) return "mqtt";
+    if (!screen_stream_sockets_closed()) return "rtsp";
+    return "mqtt state";
+}
+
+static bool is_going_down(PscPmState pm_state, PscPmState previous) {
+    switch (pm_state) {
+        case PscPmState_ReadyAwaken:         // MinimumAwake
+            // First step of sleep when coming from FullAwake; on wake-up it is
+            // reached from EssentialServicesAwake instead.
+            return previous == PscPmState_Awake;
+        case PscPmState_ReadySleep:          // SleepReady
+        case PscPmState_ReadySleepCritical:  // EssentialServicesSleepReady
+        case PscPmState_ReadyShutdown:       // ShutdownReady
+            return true;
+        default:
+            return false;
+    }
 }
 
 // psc notifies registered modules before the console sleeps or shuts down and
@@ -173,8 +204,10 @@ static bool wait_for_sockets_closed(AppState *state) {
 // libnx names the states differently; the official names are used in the
 // comments: 0 FullAwake, 1 MinimumAwake, 2 SleepReady,
 // 3 EssentialServicesSleepReady, 4 EssentialServicesAwake, 5 ShutdownReady.
+// Sleep goes 0 -> 1 -> 2 -> 3, wake-up 3 -> 4 -> 1 -> 0.
 static void power_guard_thread_main(void *arg) {
     AppState *state = arg;
+    PscPmState previous = PscPmState_Awake;
 
     while (true) {
         if (R_FAILED(eventWait(&g_psc_module.event, UINT64_MAX))) {
@@ -190,37 +223,36 @@ static void power_guard_thread_main(void *arg) {
         // psc waits for every module with a deadline, so nothing slow may run
         // before the acknowledgement. LOG_* writes to the SD card through the
         // single fs session shared by all threads, so it is done afterwards.
+        // Sockets are closed at the very first step of sleep (MinimumAwake):
+        // once that step is acknowledged the network is already being
+        // suspended and sends can block.
         const char *event = NULL;
-        bool sockets_closed = true;
-        switch (pm_state) {
-            case PscPmState_ReadySleep:          // SleepReady
-            case PscPmState_ReadySleepCritical:  // EssentialServicesSleepReady
-            case PscPmState_ReadyShutdown:       // ShutdownReady
-                if (!state->power_sleeping) {
-                    set_power_sleeping(state, true);
-                    sockets_closed = wait_for_sockets_closed(state);
-                    event = pm_state == PscPmState_ReadyShutdown ? "shutdown" : "sleep";
-                }
-                break;
-            case PscPmState_Awake:               // FullAwake
-            case PscPmState_ReadyAwaken:         // MinimumAwake
-                if (state->power_sleeping) {
-                    set_power_sleeping(state, false);
-                    event = "awake";
-                }
-                break;
-            default:                             // EssentialServicesAwake
-                break;
+        const char *still_open = NULL;
+        u64 wait_ms = 0;
+        if (is_going_down(pm_state, previous)) {
+            if (!state->power_sleeping) {
+                u64 start = monotonic_ms();
+                set_power_sleeping(state, true);
+                still_open = wait_for_sockets_closed(state);
+                wait_ms = monotonic_ms() - start;
+                event = pm_state == PscPmState_ReadyShutdown ? "shutdown" : "sleep";
+            }
+        } else if (pm_state == PscPmState_Awake) {
+            if (state->power_sleeping) {
+                set_power_sleeping(state, false);
+                event = "awake";
+            }
         }
+        previous = pm_state;
 
         Result ack_rc = pscPmModuleAcknowledge(&g_psc_module, pm_state);
 
         LOG_I("power", "psc state=%d flags=0x%x ack=0x%x", (int) pm_state, flags, ack_rc);
         if (event) {
-            LOG_I("power", "power: %s", event);
+            LOG_I("power", "power: %s (sockets closed in %llu ms)", event, (unsigned long long) wait_ms);
         }
-        if (!sockets_closed) {
-            LOG_W("power", "power: sockets close timed out");
+        if (still_open) {
+            LOG_W("power", "power: sockets close timed out (%s still open)", still_open);
         }
     }
 }

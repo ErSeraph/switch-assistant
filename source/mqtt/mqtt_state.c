@@ -373,6 +373,18 @@ void mqtt_get_system_versions(AppState *state, char *fw_ver, size_t fw_size, cha
 }
 
 
+void mqtt_publish_sleep_states(int fd, const AppConfig *config) {
+    char topic[192];
+    mqtt_media_player_state_topic(config, topic, sizeof(topic));
+    mqtt_send_publish(fd, topic, "off", true);
+    mqtt_remote_state_topic(config, topic, sizeof(topic));
+    mqtt_send_publish(fd, topic, "OFF", true);
+    mqtt_backlight_state_topic(config, topic, sizeof(topic));
+    mqtt_send_publish(fd, topic, "OFF", true);
+    mqtt_state_topic(config, "backlight", topic, sizeof(topic));
+    mqtt_send_publish(fd, topic, "OFF", true);
+}
+
 void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *config, SensorSnapshot *snapshot, bool force) {
     char value[64];
     u32 percent = 0;
