@@ -16,7 +16,7 @@
 // Two lifetimes:
 // - per use (svc_open/svc_close around the calls): lbl, spsm, setsys, spl.
 //   lbl is read every second but fatal needs its own lbl session at any time.
-// - per MQTT connection (svc_mqtt_*): psm, audctl, pminfo, hid, nifm, ts.
+// - per MQTT connection (svc_mqtt_*): psm, audctl, pminfo, hid, nifm, ts, apm.
 //   They are read every second by the sensor loop; they are opened when MQTT
 //   connects and closed when the connection ends, which includes sleep and
 //   shutdown (the MQTT loop disconnects before psc is acknowledged).
@@ -35,6 +35,7 @@ typedef enum {
     SvcId_Hid,
     SvcId_Nifm,
     SvcId_Ts,
+    SvcId_Apm,
     SvcId_Count,
 } SvcId;
 

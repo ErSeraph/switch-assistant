@@ -24,6 +24,8 @@ static Result svc_initialize(SvcId id) {
             return nifmInitialize(NifmServiceType_System);
         case SvcId_Ts:
             return tsInitialize();
+        case SvcId_Apm:
+            return apmInitialize();
         default:
             return MAKERESULT(Module_Libnx, LibnxError_BadInput);
     }
@@ -73,6 +75,9 @@ void svc_close(SvcId id) {
         case SvcId_Ts:
             tsExit();
             break;
+        case SvcId_Apm:
+            apmExit();
+            break;
         default:
             break;
     }
@@ -96,6 +101,9 @@ void svc_mqtt_open_all(AppState *state) {
         state->svc_nifm_ready = true;
         mutexUnlock(&state->lock);
     }
+    // apm always exists; its performance mode is how a sysmodule tells docked
+    // from handheld (appletGetOperationMode only works in applets).
+    svc_mqtt_open_one(SvcId_Apm, true);
     // tsGetTemperature returns IncompatSysVer on 17.0.0+, so ts would only cost IPC there.
     svc_mqtt_open_one(SvcId_Ts, state->svc_ts_ready && hosversionBefore(17, 0, 0));
 }

@@ -750,11 +750,12 @@ void mqtt_publish_switch_sensors(AppState *state, int fd, const AppConfig *confi
         mqtt_diagnostics_state_topic(config, diag_state_top, sizeof(diag_state_top));
         publish_topic_if_changed(fd, snapshot, force, diag_state_top, "healthy");
     }
-    {
-        AppletOperationMode op_mode = appletGetOperationMode();
-        bool is_docked = (op_mode != AppletOperationMode_Handheld);
+    // appletGetOperationMode() needs an applet: in the sysmodule it always
+    // reported handheld. The apm performance mode is Boost only when docked.
+    ApmPerformanceMode perf_mode = ApmPerformanceMode_Invalid;
+    if (svc_mqtt_is_open(SvcId_Apm) && R_SUCCEEDED(apmGetPerformanceMode(&perf_mode)) && perf_mode != ApmPerformanceMode_Invalid) {
         publish_if_changed(fd, config, snapshot, force, "docked", snapshot->docked, sizeof(snapshot->docked),
-                           is_docked ? "ON" : "OFF");
+                           perf_mode == ApmPerformanceMode_Boost ? "ON" : "OFF");
     }
     if (svc_mqtt_is_open(SvcId_Ts)) {
         s32 soc_temp = 0;
