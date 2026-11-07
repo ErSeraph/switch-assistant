@@ -9,6 +9,9 @@
 bool screen_stream_start(AppState *state);
 void screen_stream_stop(void);
 void screen_stream_set_paused(bool paused);
+bool screen_stream_sockets_closed(void);
+// Closes the RTSP listener and client sockets right away (sleep path).
+void screen_stream_close_sockets(void);
 
 u16 screen_stream_port(void);
 void screen_stream_get_status(char *out, size_t out_size);

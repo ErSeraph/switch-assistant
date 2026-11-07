@@ -1,31 +1,194 @@
-name: Build and Release
+---
+name: Release
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+    inputs:
+      release_type:
+        description: "Type of release (stable, beta, nightly)"
+        required: true
+        default: "beta"
+        type: choice
+        options:
+          - stable
+          - beta
+          - nightly
 
-permissions:
-  contents: write
+      bump_level:
+        description: "Bump Level (SemVer only: major, minor, patch)"
+        required: false
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+      version_override:
+        description: "Manually override new version (e.g. 1.2.3 or 2026.6.2b1). Leave empty to use automatic calculation."
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - '**/manifest.json'
+      - '**/translations/**'
+      - 'CHANGELOG.md'
+      - '.github/workflows/issue-orchestrator.yml'
+      - '.github/ISSUE_TEMPLATE/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-release
+  cancel-in-progress: true
 
 jobs:
-  build:
+  versioning:
+    name: Determine Version
+    if: github.event_name == 'workflow_dispatch' || (github.event.head_commit != null && contains(github.event.head_commit.message, '[bump-version]'))
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag: ${{ steps.get_version.outputs.tag }}
+      is_prerelease: ${{ steps.get_version.outputs.is_prerelease }}
+      release_body: ${{ steps.get_version.outputs.release_body }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Build NRO
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.15.2'
+
+      - name: Calculate Version and Release Details
+        id: get_version
+        shell: bash
+        env:
+          RELEASE_TYPE: ${{ github.event.inputs.release_type || (contains(github.event.head_commit.message, '[bump-version]') && 'stable' || 'beta') }}
+          BUMP_LEVEL: ${{ github.event.inputs.bump_level || 'patch' }}
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          python .github/scripts/calculate_release_details.py
+          if [ ! -f release_body.md ]; then
+            echo "# Release ${{ steps.get_version.outputs.version }}" > release_body.md
+          fi
+
+      - name: Upload Release Body
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: release-body
+          path: release_body.md
+
+  sync-version:
+    name: Sync Repository Version
+    needs: versioning
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.15.2'
+
+      - name: Configure Git and pull latest
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git reset --hard HEAD
+          git pull --rebase origin ${{ github.ref_name }}
+
+      - name: Update Files
+        shell: bash
+        run: |
+          python .github/scripts/version_manager.py bump --type ${{ github.event.inputs.release_type || (contains(github.event.head_commit.message, '[bump-version]') && 'stable' || 'beta') }} --level ${{ github.event.inputs.bump_level || 'patch' }} --override "${{ github.event.inputs.version_override || '' }}"
+
+          if [ -f .github/scripts/update_templates.py ]; then
+            python .github/scripts/update_templates.py "${{ needs.versioning.outputs.version }}"
+          fi
+
+      - name: Commit and Push
+        run: |
+          git add version.mk pyproject.toml custom_components/*/manifest.json .github/ISSUE_TEMPLATE/*.yml .github/ISSUE_TEMPLATE/*.yaml 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: release version ${{ needs.versioning.outputs.version }} [skip ci]"
+            git push origin HEAD:${{ github.ref_name }} || (git pull --rebase origin ${{ github.ref_name }} && git push origin HEAD:${{ github.ref_name }})
+          fi
+
+      - name: Download Release Body
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: release-body
+
+      - name: Update Draft Status
+        shell: bash
+        run: |
+          cp release_body.md updated_draft_body.md
+
+      - name: Create Draft Release on GitHub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.versioning.outputs.tag }}
+          VERSION: ${{ needs.versioning.outputs.version }}
+          IS_PRERELEASE: ${{ needs.versioning.outputs.is_prerelease }}
+        shell: bash
+        run: |
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          git tag -d "$TAG" 2>/dev/null || true
+          git push --delete origin "$TAG" 2>/dev/null || true
+
+          prerelease_arg=""
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            prerelease_arg="--prerelease"
+          fi
+          gh release create "$TAG" \
+            --target "${{ github.ref_name }}" \
+            --title "Release $VERSION" \
+            --notes-file "updated_draft_body.md" \
+            --draft \
+            $prerelease_arg
+
+
+  gh-release:
+    needs: [versioning, sync-version]
+    if: always() && needs.versioning.result == 'success' && needs.sync-version.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Pull latest changes
+        run: |
+          git pull --rebase origin ${{ github.ref_name }}
+
+      - name: 🛠️ Build Switch NRO and Overlay
         run: |
           set -euo pipefail
           docker pull devkitpro/devkita64
-          docker run --rm -v "$PWD:/workspace" -w /workspace/sysmodule devkitpro/devkita64 /bin/bash -lc "make install-layout"
-          docker run --rm -v "$PWD:/workspace" -w /workspace/overlay devkitpro/devkita64 /bin/bash -lc "make"
-          docker run --rm -v "$PWD:/workspace" -w /workspace/overlay-loader devkitpro/devkita64 /bin/bash -lc "make install-layout"
+          docker run --rm -v "$PWD:/workspace" -w /workspace/sysmodule devkitpro/devkita64 /bin/bash -lc "make install-layout APP_VERSION='${{ needs.versioning.outputs.version }}'"
+          docker run --rm -v "$PWD:/workspace" -w /workspace/overlay devkitpro/devkita64 /bin/bash -lc "make APP_VERSION='${{ needs.versioning.outputs.version }}'"
+          docker run --rm -v "$PWD:/workspace" -w /workspace/overlay-loader devkitpro/devkita64 /bin/bash -lc "make install-layout APP_VERSION='${{ needs.versioning.outputs.version }}'"
           mkdir -p romfs/sysmodule
           cp sysmodule/atmosphere/contents/00FF000053484101/exefs.nsp romfs/sysmodule/exefs.nsp
           : > romfs/sysmodule/boot2.flag
@@ -35,24 +198,108 @@ jobs:
           mkdir -p romfs/overlay
           cp overlay/switch-ha-overlay.ovl romfs/overlay/switch-ha-overlay.ovl
           rm -rf build switch-ha.elf switch-ha.nro
-          docker run --rm -v "$PWD:/workspace" -w /workspace devkitpro/devkita64 /bin/bash -lc "make"
+          docker run --rm -v "$PWD:/workspace" -w /workspace devkitpro/devkita64 /bin/bash -lc "make APP_VERSION='${{ needs.versioning.outputs.version }}'"
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+      - name: Download Release Body Artifact
+        uses: actions/download-artifact@v8.0.2
         with:
-          name: switch-ha
-          path: switch-ha.nro
+          name: release-body
 
-      - name: Prepare release notes
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.versioning.outputs.tag }}
+          VERSION: ${{ needs.versioning.outputs.version }}
+          IS_PRERELEASE: ${{ needs.versioning.outputs.is_prerelease }}
+        shell: bash
         run: |
-          set -euo pipefail
-          git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format="%(contents)" > RELEASE_NOTES.md
+          prerelease_arg=""
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            prerelease_arg="--prerelease"
+          fi
+          
+          mkdir -p package/switch/switch-ha package/atmosphere/contents/00FF000053484101/flags package/atmosphere/contents/00FF000053484102/flags
+          if [ -f "switch-ha.nro" ]; then
+            cp switch-ha.nro package/switch/switch-ha/switch-ha.nro
+          fi
+          if [ -f "overlay/switch-ha-overlay.ovl" ]; then
+            cp overlay/switch-ha-overlay.ovl package/switch/switch-ha/switch-ha-overlay.ovl
+          fi
+          if [ -f "sysmodule/atmosphere/contents/00FF000053484101/exefs.nsp" ]; then
+            cp sysmodule/atmosphere/contents/00FF000053484101/exefs.nsp package/atmosphere/contents/00FF000053484101/exefs.nsp
+            touch package/atmosphere/contents/00FF000053484101/flags/boot2.flag
+          fi
+          if [ -f "overlay-loader/atmosphere/contents/00FF000053484102/exefs.nsp" ]; then
+            cp overlay-loader/atmosphere/contents/00FF000053484102/exefs.nsp package/atmosphere/contents/00FF000053484102/exefs.nsp
+          fi
+          (cd package && zip -r ../switch-assistant.zip atmosphere switch)
 
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ github.ref_name }}
-          body_path: RELEASE_NOTES.md
-          files: switch-ha.nro
+          files_to_upload=()
+          if [ -f "switch-ha.nro" ]; then
+            files_to_upload+=("switch-ha.nro")
+          fi
+          if [ -f "switch-assistant.zip" ]; then
+            files_to_upload+=("switch-assistant.zip")
+          fi
+          if [ -f "overlay/switch-ha-overlay.ovl" ]; then
+            files_to_upload+=("overlay/switch-ha-overlay.ovl")
+          fi
+          if [ -f "sysmodule/atmosphere/contents/00FF000053484101/exefs.nsp" ]; then
+            files_to_upload+=("sysmodule/atmosphere/contents/00FF000053484101/exefs.nsp")
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "Release $VERSION" \
+              --notes-file "release_body.md" \
+              --draft=false \
+              $prerelease_arg
+            if [ ${#files_to_upload[@]} -gt 0 ]; then
+              gh release upload "$TAG" "${files_to_upload[@]}" --clobber
+            fi
+          else
+            gh release create "$TAG" \
+              --target "${{ github.ref_name }}" \
+              --title "Release $VERSION" \
+              --notes-file "release_body.md" \
+              $prerelease_arg \
+              "${files_to_upload[@]}"
+          fi
+
+      - name: Post-Release Dev Bump
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git reset --hard HEAD
+          git pull --rebase origin ${{ github.ref_name }}
+          git fetch --tags
+          NEW_DEV=$(python .github/scripts/version_manager.py bump --type dev --level patch)
+
+          if [ -f .github/scripts/update_templates.py ]; then
+            python .github/scripts/update_templates.py "${{ needs.versioning.outputs.version }}"
+          fi
+          if ! git diff --quiet; then
+            git commit -am "chore(dev): bump to $NEW_DEV [skip ci]"
+            git push origin HEAD:${{ github.ref_name }} || (git pull --rebase origin ${{ github.ref_name }} && git push origin HEAD:${{ github.ref_name }})
+          fi
+
+  cleanup-release:
+    needs: [versioning, sync-version, gh-release]
+    if: always() && needs.versioning.result == 'success' && (needs.sync-version.result == 'failure' || needs.gh-release.result == 'failure' || cancelled())
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Delete Draft Release and Tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.versioning.outputs.tag }}
+        shell: bash
+        run: |
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          git tag -d "$TAG" 2>/dev/null || true
+          git push --delete origin "$TAG" 2>/dev/null || true
+

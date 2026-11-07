@@ -1,9 +1,19 @@
 {
 	"name":	"switch-ha-sysmodule",
+	"program_id":	"0x00FF000053484101",
+	"program_id_range_min":	"0x00FF000053484101",
+	"program_id_range_max":	"0x00FF000053484101",
 	"title_id":	"0x00FF000053484101",
 	"title_id_range_min":	"0x00FF000053484101",
 	"title_id_range_max":	"0x00FF000053484101",
-	"main_thread_stack_size":	"0x00008000",
+	"version":	"0x0001",
+	"system_resource_size":	"0x00000000",
+	"optimize_memory_allocation":	false,
+	"disable_device_address_space_merge":	true,
+	"enable_alias_region_extra_size":	false,
+	"prevent_code_reads":	false,
+	"signature_key_generation":	0,
+	"main_thread_stack_size":	"0x00010000",
 	"main_thread_priority":	44,
 	"default_cpu_id":	3,
 	"process_category":	0,
@@ -82,7 +92,9 @@
 				"svcGetProcessList":	"0x65",
 				"svcCreatePort":	"0x70",
 				"svcManageNamedPort":	"0x71",
-				"svcConnectToPort":	"0x72"
+				"svcConnectToPort":	"0x72",
+				"svcTerminateProcess":	"0x7B",
+				"svcSleepSystem":	"0x4D"
 			}
 		}, {
 			"type":	"min_kernel_version",

@@ -1,0 +1,28 @@
+[project]
+name = "switch-assistant"
+version = "2.0.1-dev0"
+description = "Connect your Nintendo Switch to Home Assistant via MQTT"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = "==3.15.2"
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = ["E501", "B008", "SIM102", "SIM105", "SIM117", "E402", "B017", "B904", "ARG001", "RUF012", "DTZ003", "DTZ007", "DTZ001", "DTZ005", "BLE001", "S110", "S112"]
+
+[tool.mypy]
+explicit_package_bases = true
+python_version = "3.15"
+check_untyped_defs = true
+disallow_any_generics = true
+ignore_missing_imports = true
+no_implicit_optional = true
+show_error_codes = true
+strict_equality = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = false

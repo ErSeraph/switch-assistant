@@ -77,6 +77,7 @@ void config_set_defaults(AppConfig *config) {
     snprintf(config->device_name, sizeof(config->device_name), "Nintendo Switch");
     config->startup_delay_seconds = 0;
     config->notification_overlay_enabled = 1;
+    config->power_events_enabled = 1;
     config_generate_client_id(config);
 }
 
@@ -127,6 +128,11 @@ bool config_load(AppConfig *config) {
         } else if (strcmp(key, "notification_overlay_enabled") == 0) {
             config->notification_overlay_enabled = atoi(value) != 0 ? 1 : 0;
             found_notification_overlay_enabled = true;
+        } else if (strcmp(key, "power_events_enabled") == 0) {
+            // Debug switch: 0 = do not register with psc (no sleep/wake events).
+            config->power_events_enabled = atoi(value) != 0 ? 1 : 0;
+        } else if (strcmp(key, "mac_address") == 0 || strcmp(key, "mac") == 0) {
+            strncpy(config->mac_address, value, sizeof(config->mac_address) - 1);
         }
     }
 
@@ -158,6 +164,10 @@ bool config_save(const AppConfig *config) {
     fprintf(file, "device_name=%s\n", config->device_name);
     fprintf(file, "startup_delay_seconds=%d\n", clamp_startup_delay(config->startup_delay_seconds));
     fprintf(file, "notification_overlay_enabled=%d\n", config->notification_overlay_enabled ? 1 : 0);
+    fprintf(file, "power_events_enabled=%d\n", config->power_events_enabled ? 1 : 0);
+    if (config->mac_address[0] != '\0') {
+        fprintf(file, "mac_address=%s\n", config->mac_address);
+    }
 
     if (fflush(file) != 0) {
         set_error("flush config failed");

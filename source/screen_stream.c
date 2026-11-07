@@ -761,6 +761,14 @@ void screen_stream_set_paused(bool paused) {
     g_paused = paused;
 }
 
+void screen_stream_close_sockets(void) {
+    disconnect_client();
+}
+
+bool screen_stream_sockets_closed(void) {
+    return !g_listener_ready && !g_client_connected;
+}
+
 u16 screen_stream_port(void) {
     return SCREEN_STREAM_RTSP_PORT;
 }
