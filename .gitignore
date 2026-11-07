@@ -52,3 +52,5 @@ Thumbs.db
 .vscode/
 .idea/
 .tmp-*/
+release_body.md
+/temp_release

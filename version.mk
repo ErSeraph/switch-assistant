@@ -1,1 +1,1 @@
-APP_VERSION ?= 1.8
+APP_VERSION ?= 2.0.1-dev0

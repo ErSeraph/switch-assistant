@@ -1,8 +1,8 @@
 TARGET := switch-ha
 BUILD := build
-SOURCES := source
+SOURCES := source source/mqtt
 DATA := romfs
-INCLUDES := include
+INCLUDES := include include/mqtt
 ifeq ($(strip $(DEVKITPRO)),)
 $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>devkitPro")
 endif

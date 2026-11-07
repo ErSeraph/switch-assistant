@@ -29,6 +29,8 @@ typedef struct {
     char device_name[64];
     int startup_delay_seconds;
     int notification_overlay_enabled;
+    int power_events_enabled;
+    char mac_address[32];
 } AppConfig;
 
 typedef struct {
@@ -43,10 +45,15 @@ typedef struct {
     bool config_dirty;
     bool restart_required;
     bool svc_hid_ready;
+    bool svc_psm_ready;
     bool svc_lbl_ready;
     bool svc_audctl_ready;
     bool svc_spsm_ready;
     bool svc_pminfo_ready;
+    bool svc_setsys_ready;
+    bool svc_spl_ready;
+    bool svc_ts_ready;
+    bool svc_nifm_ready;
     bool power_sleeping;
     bool sensor_publish_requested;
     u64 last_heartbeat_ms;
@@ -54,13 +61,15 @@ typedef struct {
     char config_status[SHA_LOG_LINE];
     char mqtt_last_error[SHA_LOG_LINE];
     char game_status[SHA_LOG_LINE];
+    char cached_mac[32];
+    char cached_firmware_ver[64];
+    char cached_atmosphere_ver[64];
     AppMode app_mode;
     char log_lines[SHA_MAX_LOG][SHA_LOG_LINE];
     int log_count;
 } AppState;
 
 void app_state_init(AppState *state);
+void app_state_refresh_device_info(AppState *state);
 void app_state_set_status(AppState *state, const char *fmt, ...);
 void app_state_push_log(AppState *state, const char *fmt, ...);
-Result app_lbl_open(void);
-void app_lbl_close(void);

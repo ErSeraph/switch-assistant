@@ -8,10 +8,9 @@
   <a href="https://switch.hacks.guide/"><img alt="Nintendo Switch" src="https://img.shields.io/badge/Nintendo%20Switch-homebrew-e60012?style=for-the-badge"></a>
 </p>
 <p align="center">
-  <a href="https://github.com/ErSeraph/switch-assistant/releases/latest"><img src="https://img.shields.io/github/v/release/ErSeraph/switch-assistant?style=flat-square" /></a>
-  <a href="https://github.com/ErSeraph/switch-assistant/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ErSeraph/switch-assistant?style=flat-square" /></a>
-  <a href="https://github.com/ErSeraph/switch-assistant/releases"><img src="https://img.shields.io/github/downloads/erseraph/switch-assistant/total?style=flat-square&color=1f883d"></a>
-  <a href="https://ko-fi.com/erseraph"><img src="https://img.shields.io/badge/Ko--fi-support-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white" /></a>
+  <a href="https://github.com/FaserF/switch-assistant/releases/latest"><img src="https://img.shields.io/github/v/release/FaserF/switch-assistant?style=flat-square" /></a>
+  <a href="https://github.com/FaserF/switch-assistant/blob/main/LICENSE"><img src="https://img.shields.io/github/license/FaserF/switch-assistant?style=flat-square" /></a>
+  <a href="https://github.com/FaserF/switch-assistant/releases"><img src="https://img.shields.io/github/downloads/FaserF/switch-assistant/total?style=flat-square&color=1f883d"></a>
 </p>
 
 <p align="center">
@@ -35,13 +34,171 @@ Once configured, it publishes console sensors to Home Assistant and shows Home A
 
 ## What It Does
 
-- Shows battery, charging state, temperature, brightness, volume, and connected controllers in Home Assistant.
-- Reports whether a game is running and publishes the current game Title ID.
-- Exposes reboot and shutdown buttons in Home Assistant.
-- Sends Home Assistant popup notifications to the Switch.
-- Provides a simple Homebrew configuration app on the console.
-- Uses MQTT Discovery so entities appear automatically in Home Assistant.
-- Live screen streaming to Home Assistant via RTSP.
+- **Remote Control Entity**: Control your Nintendo Switch like a smart TV / remote in Home Assistant (power, sleep/wake, volume up/down/mute, brightness, reboot, shutdown, activity / channel switcher).
+- **Media Player Entity**: Track playing state, view current game title, control volume, and launch installed games directly from the source / channel list.
+- **Game Launcher & Player Filters**: Dedicated `select` entities for all installed games as well as filtered by player count (2 Player, 4 Player, 8/8+ Player games). Selecting a game instantly launches it on the console.
+- **Player Count Sensors**: Reports the number and list of installed multiplayer games (2p, 4p, 8p+) with full JSON attributes for automations and dashboard cards.
+- **Firmware Update Entity**: Shows installed firmware version with direct links to [THZoria/NX_Firmware Releases](https://github.com/THZoria/NX_Firmware/releases).
+- **Console & Battery Telemetry**: Shows battery level, charging state, voltage, temperature, health, screen brightness, volume, audio output target, and connected controllers.
+- **Game Detection**: Reports whether a game is currently running and publishes the current game Title ID and localized title name.
+- **Power Buttons**: Exposes reboot and shutdown buttons in Home Assistant.
+- **In-Game Notifications**: Displays Home Assistant popup notifications over your game without needing Tesla Menu.
+- **Live Video Streaming**: Real-time RTSP screen stream directly into Home Assistant Generic Camera.
+- **Zero Config MQTT Discovery**: All entities appear automatically in Home Assistant.
+
+## Supported Home Assistant Entities
+
+| Domain | Entity | Description | Default Status | Type / Values |
+| --- | --- | --- | --- | --- |
+| `remote` | `Remote` | TV-style remote control | **Enabled** | Power on/off, sleep/wake, volume, brightness, reboot, shutdown, activity (game launch) |
+| `media_player` | `MediaPlayer` | Media player controller | **Enabled** | State (`playing`, `idle`, `off`), volume slider, current game title, source selector (game launch) |
+| `select` | `Game Launcher` | Switch installed games picker | **Enabled** | Channel/game picker (select title to launch) |
+| `select` | `2 Player Games` | Installed 2+ player games picker | **Enabled** | Select title to launch |
+| `select` | `4 Player Games` | Installed 4+ player games picker | **Enabled** | Select title to launch |
+| `select` | `8 Player Games` | Installed 8+ player games picker | **Enabled** | Select title to launch |
+| `sensor` | `2 Player Games Count` | Count & list of 2+ player games | **Enabled** | Integer count, `games` attribute list |
+| `sensor` | `4 Player Games Count` | Count & list of 4+ player games | **Enabled** | Integer count, `games` attribute list |
+| `sensor` | `8 Player Games Count` | Count & list of 8+ player games | **Enabled** | Integer count, `games` attribute list |
+| `update` | `Firmware` | Firmware update tracker | **Enabled** | Current installed FW version, release URL ([THZoria/NX_Firmware](https://github.com/THZoria/NX_Firmware/releases)) |
+| `update` | `Atmosphère` | Atmosphère CFW update tracker | **Enabled** | Current installed CFW version, GitHub release URL & summary ([Atmosphere-NX](https://github.com/Atmosphere-NX/Atmosphere)) |
+| `sensor` | `Battery` | Device battery percentage (HA Battery integration) | **Enabled** | `%` (0–100, `device_class: battery`) |
+| `binary_sensor` | `Battery Charging` | Charger connected / charging status | **Enabled** | `ON` / `OFF` (`device_class: battery_charging`) |
+| `binary_sensor` | `Docked` | Console dock status | **Enabled** | `ON` / `OFF` |
+| `binary_sensor` | `Game Running` | Status if a game is active | **Enabled** | `ON` / `OFF` |
+| `sensor` | `Current Game` | Name of the running game | **Enabled** | Game Title String |
+| `sensor` | `Player Count` | Number of active player controllers | **Enabled** | `0` – `8` |
+| `button` | `Reboot` | Restarts the Switch console | **Enabled** | Button press |
+| `button` | `Shutdown` | Powers down the Switch console | **Enabled** | Button press |
+| `button` | `Sleep` | Puts the Switch console to sleep | **Enabled** | Button press |
+| `button` | `Close Game` | Returns to the Home Menu / closes active game | **Enabled** | Button press |
+| `button` | `Launch Daybreak` | Launches the Daybreak firmware updater | **Enabled** | Button press |
+| `event` | `Overlay Action` | Events triggered from overlay / shortcuts | **Enabled** | `toggle`, `turn_on`, `turn_off`, `call_service`, etc. |
+| `notify` | `Popup Notification` | In-game notification toast | **Enabled** | Text message / JSON payload |
+| `sensor` | `Current Game Title ID` | Hex Title ID of running game | *Disabled by default* | 16-character hex (e.g. `0100000000010000`) |
+| `sensor` | `Charger Type` | Detected charger power rate (Diagnostic) | *Disabled by default* | `unconnected`, `enough_power`, `low_power`, `not_supported` |
+| `sensor` | `Battery Voltage` | Real-time battery voltage (Diagnostic) | *Disabled by default* | `mV` |
+| `sensor` | `Battery Temperature` | Battery temperature (Diagnostic) | *Disabled by default* | `°C` |
+| `sensor` | `Battery Health` | Battery capacity health percentage (Diagnostic) | *Disabled by default* | `%` |
+| `sensor` | `SoC Temperature` | Internal processor temperature | *Disabled by default* | `°C` |
+| `sensor` | `Uptime` | Console system uptime | *Disabled by default* | `s` |
+| `sensor` | `WiFi Signal Strength` | WiFi RSSI connection strength | *Disabled by default* | `dBm` |
+| `sensor` | `SD Card Free Space` | Available storage space on SD card | *Disabled by default* | `MB` |
+| `sensor` | `SD Card Total Space` | Total storage capacity of SD card | *Disabled by default* | `MB` |
+| `sensor` | `Internal Storage Free Space` | Available storage space on NAND (User Partition) | *Disabled by default* | `MB` |
+| `sensor` | `Internal Storage Total Space` | Total capacity of internal NAND (User Partition) | *Disabled by default* | `MB` |
+| `sensor` | `RAM Used` | Current system memory usage | *Disabled by default* | `MB` |
+| `number` | `Screen Brightness` | Controls display brightness level | **Enabled** | `0` – `100` (`%`, step `5`) |
+| `switch` | `Screen` | Controls display backlight state (on/off) | **Enabled** | `ON` / `OFF` |
+| `sensor` | `Screen Brightness Sensor` | Diagnostic display brightness reading | *Disabled by default* | `%` (0–100) |
+| `binary_sensor` | `Screen Backlight Sensor` | Diagnostic screen backlight status | *Disabled by default* | `ON` / `OFF` |
+| `sensor` | `Volume` | System audio volume | *Disabled by default* | `%` (0–100) |
+| `sensor` | `Audio Output Target` | Active audio endpoint | *Disabled by default* | `speaker`, `headphone`, `tv`, `usb`, `bluetooth` |
+| `sensor` | `Player 1–8 Controller` | Controller model per player slot | *Disabled by default* | `handheld`, `joydual`, `joyleft`, `joyright`, `pro`, `gamecube`, `snes`, `n64`, `genesis` |
+| `binary_sensor` | `Player 1–8 Controller Wired` | Wired/docked or wireless status per player slot | *Disabled by default* | `ON` (wired) / `OFF` (wireless/none) |
+| `sensor` | `Screen Stream URL` | RTSP live video stream URL | *Disabled by default* | `rtsp://<switch_ip>:8554/` |
+
+## Remote Control, Media Player & Game Launching
+
+### Game Launcher & Channel Selection
+All installed games are automatically enumerated by the sysmodule and exposed to Home Assistant:
+- **`media_player` Source List**: Selecting a game in the media player's `source` dropdown immediately requests application launch on the Switch.
+- **`remote` Activity List**: Selecting an activity launches that game.
+- **`select` Entities**:
+  - `select.nintendo_switch_game`: Dropdown of all installed games.
+  - `select.nintendo_switch_2_player_games`: Filtered list for 2+ player games.
+  - `select.nintendo_switch_4_player_games`: Filtered list for 4+ player games.
+  - `select.nintendo_switch_8_player_games`: Filtered list for 8+ player games.
+
+### Customizing Player Counts & Titles
+Switch Assistant includes built-in keyword and title detection for player counts (2p, 4p, 8p+), but you can customize or override them at any time:
+1. **`players.ini` / `players.txt`**: Create `sdmc:/switch/switch-ha/players.ini` or `players.txt`:
+   ```ini
+   0100000000010000=2
+   Super Mario Odyssey=2
+   Mario Kart 8 Deluxe=4
+   Super Smash Bros Ultimate=8
+   ```
+2. **`titles.txt` (3rd column)**: In `sdmc:/switch/switch-ha/titles.txt`:
+   ```text
+   0100000000010000;Super Mario Odyssey;2
+   0100152000022000;Mario Kart 8 Deluxe;4
+   ```
+
+### Remote Entity Commands
+You can send commands using Home Assistant's `remote.send_command` service:
+
+```yaml
+action: remote.send_command
+target:
+  entity_id: remote.nintendo_switch_remote
+data:
+  command:
+    - volume_up       # Increases volume
+    - volume_down     # Decreases volume
+    - volume_mute     # Mutes/unmutes audio
+    - brightness_up   # Increases display brightness
+    - brightness_down # Decreases display brightness
+    - screen_off      # Turns off screen / sleep
+    - screen_on       # Turns on screen / wake
+    - reboot          # Reboots console
+    - shutdown        # Powers off console
+```
+
+### Diagnostics & Remote Log Retrieval
+Switch Assistant includes a full remote diagnostics and structured logging subsystem with real-time log export over MQTT:
+- **Button Entity (`button.nintendo_switch_fetch_diagnostics`)**: Pressing this button in Home Assistant triggers immediate collection and publishing of current sysmodule diagnostics and recent logs.
+- **Sensor Entity (`sensor.nintendo_switch_diagnostics`)**: Reflects console health state (`healthy`, `warning`, `error`) and exposes complete telemetry as JSON attributes (firmware version, Atmosphère version, MAC address, WiFi RSSI, battery stats, SoC temperature, RAM usage, storage space, and active service statuses).
+- **MQTT Query Support**: You can publish to `switch_ha/<client_id>/command` or `switch_ha/<client_id>/command/get_logs` with optional parameters:
+  ```json
+  {"command": "get_logs", "level": "warn", "lines": 50}
+  ```
+  Supported `level` filters: `all`, `debug`, `info`, `warn`, `error`.
+  The console immediately publishes structured diagnostic data and filtered log entries to `switch_ha/<client_id>/logs/response`.
+
+### Media Player Entity
+The media player entity automatically reflects whether the Switch is actively playing a game (`playing`), on the home menu (`idle`), or asleep (`off`). It displays the current game as the media title, renders game box cover art (`entity_picture`), exposes Title ID & player capabilities via attributes, and allows direct volume slider control as well as source/game switching from standard media control cards.
+
+## Controlling Home Assistant Devices from an Overlay (UltraHand / Tesla / Shortcuts)
+
+You can trigger actions and control devices (e.g. lights, switches, scenes) in Home Assistant directly from an UltraHand overlay, Tesla menu, or homebrew script while in-game.
+
+When a command is triggered, Switch Assistant:
+1. Calls the corresponding service / publishes the event to Home Assistant via MQTT.
+2. Displays an in-game overlay toast confirming the action (e.g. `HA Action: Living Room Light (toggle)`).
+
+### How to Trigger from UltraHand / Tesla / Scripts
+
+Simply write a command file to `sdmc:/switch/switch-ha/overlay-command.ini`:
+
+```ini
+action=toggle
+entity_id=light.living_room
+name=Living Room Light
+```
+
+Or call any specific service:
+
+```ini
+action=call_service
+domain=scene
+service=turn_on
+entity_id=scene.gaming_night
+name=Gaming Mode
+```
+
+### Automations via MQTT Event Entity
+Switch Assistant automatically exposes an `event.nintendo_switch_overlay_action` entity in Home Assistant. You can create Home Assistant automations triggered whenever an overlay action is performed:
+
+```yaml
+alias: "Switch Overlay: Toggle Lights"
+trigger:
+  - platform: state
+    entity_id: event.nintendo_switch_overlay_action
+action:
+  - service: light.toggle
+    target:
+      entity_id: light.living_room
+```
 
 ## How It Works
 
@@ -77,7 +234,7 @@ It provides a clean visual representation of your Nintendo Switch state, includi
 
 ## Quick Installation
 
-1. Download `switch-ha.nro` from the latest [release](https://github.com/ErSeraph/switch-assistant/releases).
+1. Download `switch-ha.nro` from the latest [release](https://github.com/FaserF/switch-assistant/releases).
 2. Copy the file to your SD card:
 
    ```text
@@ -190,30 +347,27 @@ Home Assistant creates a notify entity with a name similar to:
 notify.nintendo_switch_popup_notification
 ```
 
-Example Home Assistant action:
+Example Home Assistant automation / script action:
 
 ```yaml
 action: notify.send_message
 target:
   entity_id: notify.nintendo_switch_popup_notification
 data:
-  message: "Laundry finished"
+  title: "Laundry Done"
+  message: "The washing machine has finished"
 ```
 
-The MQTT notify integration currently forwards the message body to Switch Assistant. Home Assistant's `title`
-field is not included in that MQTT payload, so the popup title defaults to `Home Assistant` when using
-`notify.send_message`.
+The notification entity automatically receives both the `title` and `message` fields via Home Assistant's standard notification platform.
 
-To send a custom title, publish directly to the popup topic with either JSON:
+You can also send custom notifications via `mqtt.publish`:
 
 ```yaml
 action: mqtt.publish
 data:
   topic: switch_ha/<client_id>/notify/popup
-  payload: '{"title":"Laundry","message":"The washing machine has finished"}'
+  payload: '{"title":"Doorbell","message":"Someone is at the front door"}'
 ```
-
-or a two-line payload where the first line is the title and the second line is the message.
 
 The sysmodule writes the latest notification here:
 
@@ -338,7 +492,8 @@ The script:
 
 ## Credits
 
-The overlay loader is derived from the ISC-licensed `nx-ovlloader` project and chainloads the Switch Assistant overlay directly instead of Tesla Menu.
+- This project is a fork of the original [Switch Assistant](https://github.com/ErSeraph/switch-assistant) by [ErSeraph](https://github.com/ErSeraph). A huge thank you to ErSeraph for creating and maintaining the original project!
+- The overlay loader is derived from the ISC-licensed `nx-ovlloader` project and chainloads the Switch Assistant overlay directly instead of Tesla Menu.
 
 ## License
 
