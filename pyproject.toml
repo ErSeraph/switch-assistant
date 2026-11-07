@@ -1,6 +1,6 @@
 [project]
 name = "switch-assistant"
-version = "2.0.1-dev1"
+version = "2.0.1-dev0"
 description = "Connect your Nintendo Switch to Home Assistant via MQTT"
 readme = "README.md"
 license = { text = "MIT" }
